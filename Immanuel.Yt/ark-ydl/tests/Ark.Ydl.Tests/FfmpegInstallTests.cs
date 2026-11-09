@@ -81,7 +81,11 @@ public class FfmpegArchiveTests
         var f = ToolLocator.GitHubReleaseFile("https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/checksums.sha256")!;
         Assert.Equal(("yt-dlp", "FFmpeg-Builds", "latest", "checksums.sha256"), (f.Owner, f.Repo, f.Tag, f.Name));
         Assert.Equal("https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/tags/latest", f.ReleaseApiUrl);
-        Assert.Null(ToolLocator.GitHubReleaseFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"));
+
+        // ".../releases/latest/download/" is GitHub's alias for the newest release, not a tag named "latest".
+        var y = ToolLocator.GitHubReleaseFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe")!;
+        Assert.Equal(("yt-dlp", "yt-dlp", null, "yt-dlp.exe"), (y.Owner, y.Repo, y.Tag, y.Name));
+        Assert.Equal("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", y.ReleaseApiUrl);
         Assert.Null(ToolLocator.GitHubReleaseFile("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"));
         Assert.Null(ToolLocator.GitHubReleaseFile(null));
     }
@@ -203,7 +207,7 @@ public sealed class FfmpegInstallTests : IDisposable
     }
 
     /// <summary>A server made of one function; it records each request as "{Accept} {URL}".</summary>
-    private sealed class Fake(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    internal sealed class Fake(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
     {
         public List<string> Requests { get; } = [];
 
@@ -224,7 +228,7 @@ public sealed class FfmpegInstallTests : IDisposable
 
     private static HttpResponseMessage Answer(string text) => Answer(HttpStatusCode.OK, Encoding.UTF8.GetBytes(text));
 
-    private sealed class Factory(HttpMessageHandler h) : IHttpClientFactory
+    internal sealed class Factory(HttpMessageHandler h) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(h, disposeHandler: false);
     }
@@ -259,7 +263,7 @@ public sealed class FfmpegInstallTests : IDisposable
     private const string Gyan = "https://dl.test/builds/ffmpeg-release-essentials.zip";
     private const string GyanVersioned = "https://dl.test/builds/packages/ffmpeg-9.9-essentials_build.zip";
 
-    private static IReadOnlyList<ToolLocator.FfmpegSource> WindowsSources() =>
+    private static IReadOnlyList<ToolLocator.ToolSource> WindowsSources() =>
         ToolLocator.FfmpegSources(new ToolOptions { FfmpegWindowsReleaseBase = Gh, FfmpegWindowsFallbackUrl = Gyan }, OSPlatform.Windows, Architecture.X64);
 
     private static byte[] BuildZip(string folder) =>

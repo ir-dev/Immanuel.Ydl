@@ -23,8 +23,9 @@ public sealed record ToolStatus(ToolInfo YtDlp, ToolInfo Ffmpeg, ToolInfo JsRunt
 /// Finds yt-dlp, ffmpeg and a JavaScript runtime (YouTube extraction has needed one since
 /// yt-dlp 2025.11). It downloads the official yt-dlp release when it is missing and keeps it
 /// current: YouTube changes often, and an out-of-date extractor is the usual reason a
-/// downloader "stops working". When no working ffmpeg is installed, it downloads a
-/// self-contained static build into the tools folder, so a deployment needs no system ffmpeg.
+/// downloader "stops working". When no working ffmpeg or JavaScript runtime is installed, it
+/// downloads a self-contained static ffmpeg, and deno, into the tools folder. A deployment then needs
+/// nothing installed on the machine, which is what shared hosting allows.
 /// </summary>
 public sealed partial class ToolLocator
 {
@@ -49,6 +50,9 @@ public sealed partial class ToolLocator
     /// <summary>Wait before the first retry of a download that failed with a timeout or a 408/429/5xx answer.</summary>
     internal TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(2);
 
+    /// <summary>Finds an installed tool by name (PATH and the usual install folders). Tests swap it out.</summary>
+    internal Func<string, string?> Which { get; init; } = FindOnPath;
+
     /// <summary>Completes once the first detection pass (and any bootstrap download) has finished.</summary>
     public Task WhenInitialized => _ready.Task;
 
@@ -57,6 +61,8 @@ public sealed partial class ToolLocator
     private string OwnedYtDlpPath => Path.Combine(_paths.Tools, Exe("yt-dlp"));
     private string OwnedFfmpegDir => Path.Combine(_paths.Tools, "ffmpeg");
     private string OwnedFfmpegPath => Path.Combine(OwnedFfmpegDir, Exe("ffmpeg"));
+    private string OwnedDenoDir => Path.Combine(_paths.Tools, "deno");
+    private string OwnedDenoPath => Path.Combine(OwnedDenoDir, Exe("deno"));
 
     /// <summary>True when the yt-dlp in use lives in our tools folder, so self-update is ours to run.</summary>
     public bool OwnsYtDlp => Status.YtDlp.Path is { } p &&
@@ -67,17 +73,18 @@ public sealed partial class ToolLocator
         await _gate.WaitAsync(ct);
         try
         {
-            // Independent of each other, and on a first start two of them may be downloading.
+            PrepareChildEnvironment();
+            // Independent of each other, and on a first start all three may be downloading.
             var ytTask = LocateYtDlpAsync(ct);
             var ffTask = LocateFfmpegAsync(ct);
             var jsTask = LocateJsRuntimeAsync(ct);
             await Task.WhenAll(ytTask, ffTask, jsTask);
             var (yt, ff, js) = (await ytTask, await ffTask, await jsTask);
             Status = new ToolStatus(yt, ff, js, false, DateTimeOffset.UtcNow);
-            _log.LogInformation("Tools: yt-dlp {YtVer} ({YtPath}); ffmpeg {FfVer} ({FfPath}); js {Js} {JsVer}",
-                yt.Version, yt.Path, ff.Version, ff.Path, js.Name, js.Version);
+            _log.LogInformation("Tools: yt-dlp {YtVer} ({YtPath}); ffmpeg {FfVer} ({FfPath}); js {Js} {JsVer} ({JsPath})",
+                yt.Version, yt.Path, ff.Version, ff.Path, js.Name, js.Version, js.Path);
             if (!js.Ok)
-                _log.LogWarning("No JavaScript runtime found. YouTube downloads need deno (recommended) or node >= 22. {Note}", js.Note);
+                _log.LogWarning("No JavaScript runtime. YouTube downloads need deno (recommended) or node >= 22. {Note}", js.Note);
         }
         finally
         {
@@ -87,18 +94,59 @@ public sealed partial class ToolLocator
     }
 
     /// <summary>
-    /// Looks for ffmpeg again and, if none works, downloads it again. The maintenance service calls this
-    /// while ffmpeg is missing, so one failed download at start-up doesn't last until the next restart.
+    /// yt-dlp starts deno, and deno inherits this process's environment. Under IIS, and on shared hosting
+    /// in particular, the app-pool account often has no loaded user profile, so deno's default cache
+    /// folder (%LOCALAPPDATA%\deno, ~/.cache/deno) is missing or read-only. Point it at the app's own cache
+    /// folder instead, and keep deno from checking for updates or waiting for a prompt nobody can answer.
+    /// A value the host has already set wins.
     /// </summary>
-    public async Task<ToolInfo> RetryFfmpegAsync(CancellationToken ct)
+    private void PrepareChildEnvironment()
+    {
+        SetDefault("DENO_DIR", Path.Combine(_paths.Cache, "deno"));
+        SetDefault("DENO_NO_UPDATE_CHECK", "1");
+        SetDefault("DENO_NO_PROMPT", "1");
+
+        static void SetDefault(string name, string value)
+        {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)))
+                Environment.SetEnvironmentVariable(name, value);
+        }
+    }
+
+    /// <summary>Tools that are missing although the app may download them itself ("ffmpeg", "deno").</summary>
+    public IReadOnlyList<string> MissingDownloads()
+    {
+        var s = Status;
+        var missing = new List<string>();
+        if (_opt.Tools.AutoDownloadFfmpeg && !s.Ffmpeg.Ok) missing.Add("ffmpeg");
+        if (DenoDownloadAllowed && !s.JsRuntime.Ok) missing.Add("deno");
+        return missing;
+    }
+
+    /// <summary>
+    /// Looks again for each tool in <see cref="MissingDownloads"/> and downloads the ones still missing.
+    /// The maintenance service calls this, so one failed download at start-up doesn't last until the next
+    /// restart. Returns what is still missing afterwards.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> RetryMissingAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
         {
-            var ff = await LocateFfmpegAsync(ct);
-            Status = Status with { Ffmpeg = ff, CheckedAt = DateTimeOffset.UtcNow };
-            if (ff.Ok) _log.LogInformation("ffmpeg {Version} ({Path}) is available now", ff.Version, ff.Path);
-            return ff;
+            var missing = MissingDownloads();
+            if (missing.Contains("ffmpeg"))
+            {
+                var ff = await LocateFfmpegAsync(ct);
+                Status = Status with { Ffmpeg = ff, CheckedAt = DateTimeOffset.UtcNow };
+                if (ff.Ok) _log.LogInformation("ffmpeg {Version} ({Path}) is available now", ff.Version, ff.Path);
+            }
+            if (missing.Contains("deno"))
+            {
+                var js = await LocateJsRuntimeAsync(ct);
+                Status = Status with { JsRuntime = js, CheckedAt = DateTimeOffset.UtcNow };
+                if (js.Ok) _log.LogInformation("JavaScript runtime {Name} {Version} ({Path}) is available now", js.Name, js.Version, js.Path);
+            }
+            return MissingDownloads();
         }
         finally
         {
@@ -136,7 +184,7 @@ public sealed partial class ToolLocator
         {
             _opt.Tools.YtDlpPath,
             File.Exists(OwnedYtDlpPath) ? OwnedYtDlpPath : null,
-            FindOnPath("yt-dlp"),
+            Which("yt-dlp"),
         };
         foreach (var c in candidates.Where(c => !string.IsNullOrWhiteSpace(c)))
         {
@@ -209,7 +257,8 @@ public sealed partial class ToolLocator
         _log.LogInformation("Downloading yt-dlp ({Asset}) from {Base}", asset, baseUrl);
 
         var tmp = OwnedYtDlpPath + ".download";
-        var expected = await DownloadVerifiedAsync(client, new ToolArchive(baseUrl + asset, baseUrl + "SHA2-256SUMS", asset), tmp, ct);
+        var archive = (await ViaGitHubApiAsync(client, [new ToolArchive(baseUrl + asset, baseUrl + "SHA2-256SUMS", asset)], ct))[0];
+        var expected = await DownloadVerifiedAsync(client, archive, tmp, ct);
         File.Move(tmp, OwnedYtDlpPath, overwrite: true);
         MakeExecutable(OwnedYtDlpPath);
         _log.LogInformation("yt-dlp saved to {Path} (sha256 {Hash})", OwnedYtDlpPath, expected);
@@ -232,7 +281,7 @@ public sealed partial class ToolLocator
     private async Task<ToolInfo> LocateFfmpegAsync(CancellationToken ct)
     {
         string? problem = null;
-        var candidates = new[] { _opt.Tools.FfmpegPath, File.Exists(OwnedFfmpegPath) ? OwnedFfmpegPath : null, FindOnPath("ffmpeg") }
+        var candidates = new[] { _opt.Tools.FfmpegPath, File.Exists(OwnedFfmpegPath) ? OwnedFfmpegPath : null, Which("ffmpeg") }
             .Where(c => !string.IsNullOrWhiteSpace(c)).Distinct();
         foreach (var c in candidates)
         {
@@ -269,7 +318,7 @@ public sealed partial class ToolLocator
     /// Downloads this platform's static ffmpeg + ffprobe into {Tools}/ffmpeg and checks that it runs.
     /// Each source is tried in turn (default: this platform's own); the note names every one that failed.
     /// </summary>
-    internal async Task<ToolInfo> InstallFfmpegAsync(CancellationToken ct, IReadOnlyList<FfmpegSource>? sources = null)
+    internal async Task<ToolInfo> InstallFfmpegAsync(CancellationToken ct, IReadOnlyList<ToolSource>? sources = null)
     {
         try
         {
@@ -289,8 +338,8 @@ public sealed partial class ToolLocator
     /// <summary>One file to download: its URL, the checksum file that lists it (null = "{URL after redirects}.sha256"), and the name it is listed under.</summary>
     internal sealed record ToolArchive(string Url, string? SumsUrl, string Name);
 
-    /// <summary>One place to get ffmpeg + ffprobe from: a short label for messages, and the archives that together hold both.</summary>
-    internal sealed record FfmpegSource(string Label, IReadOnlyList<ToolArchive> Archives);
+    /// <summary>One place to get a tool from (e.g. ffmpeg + ffprobe): a short label for messages, and the archives that together hold it.</summary>
+    internal sealed record ToolSource(string Label, IReadOnlyList<ToolArchive> Archives);
 
     /// <summary>
     /// Where this platform's static ffmpeg + ffprobe come from, in the order to try them. macOS and Linux
@@ -299,22 +348,22 @@ public sealed partial class ToolLocator
     /// in checksums.sha256), then on x64 gyan.dev (one zip, bare .sha256 beside it). Empty when there is
     /// no build for the platform.
     /// </summary>
-    internal static IReadOnlyList<FfmpegSource> FfmpegSources(ToolOptions o, OSPlatform os, Architecture arch)
+    internal static IReadOnlyList<ToolSource> FfmpegSources(ToolOptions o, OSPlatform os, Architecture arch)
     {
         if (os == OSPlatform.Windows)
         {
-            var list = new List<FfmpegSource>();
+            var list = new List<ToolSource>();
             var flavor = arch switch { Architecture.X64 => "win64", Architecture.Arm64 => "winarm64", Architecture.X86 => "win32", _ => null };
             if (flavor is not null && !string.IsNullOrWhiteSpace(o.FfmpegWindowsReleaseBase))
             {
                 var b = o.FfmpegWindowsReleaseBase.Trim().TrimEnd('/') + "/";
                 var zip = $"ffmpeg-master-latest-{flavor}-gpl.zip";
-                list.Add(new FfmpegSource(SourceLabel(b + zip), [new ToolArchive(b + zip, b + "checksums.sha256", zip)]));
+                list.Add(new ToolSource(SourceLabel(b + zip), [new ToolArchive(b + zip, b + "checksums.sha256", zip)]));
             }
             if (arch == Architecture.X64 && !string.IsNullOrWhiteSpace(o.FfmpegWindowsFallbackUrl))
             {
                 var url = o.FfmpegWindowsFallbackUrl.Trim();
-                list.Add(new FfmpegSource(SourceLabel(url), [new ToolArchive(url, null, Path.GetFileName(new Uri(url).AbsolutePath))]));
+                list.Add(new ToolSource(SourceLabel(url), [new ToolArchive(url, null, Path.GetFileName(new Uri(url).AbsolutePath))]));
             }
             return list;
         }
@@ -322,7 +371,7 @@ public sealed partial class ToolLocator
         var cpu = arch switch { Architecture.X64 => "amd64", Architecture.Arm64 => "arm64", _ => null };
         if (system is null || cpu is null) return [];
         var root = $"{o.FfmpegReleaseBase.TrimEnd('/')}/{system}/{cpu}/release/";
-        return [new FfmpegSource(SourceLabel(root), [new ToolArchive(root + "ffmpeg.zip", null, "ffmpeg.zip"), new ToolArchive(root + "ffprobe.zip", null, "ffprobe.zip")])];
+        return [new ToolSource(SourceLabel(root), [new ToolArchive(root + "ffmpeg.zip", null, "ffmpeg.zip"), new ToolArchive(root + "ffprobe.zip", null, "ffprobe.zip")])];
     }
 
     /// <summary>"github.com/{owner}/{repo}" for a GitHub release file, else the host.</summary>
@@ -336,7 +385,7 @@ public sealed partial class ToolLocator
         : OSPlatform.FreeBSD;
 
     /// <summary>Installs from the first source that works and returns its label; throws with every source's reason if none does.</summary>
-    private async Task<string> DownloadFfmpegAsync(IReadOnlyList<FfmpegSource> sources, CancellationToken ct)
+    private async Task<string> DownloadFfmpegAsync(IReadOnlyList<ToolSource> sources, CancellationToken ct)
     {
         if (sources.Count == 0)
             throw new PlatformNotSupportedException($"No static ffmpeg build is published for {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}).");
@@ -346,7 +395,7 @@ public sealed partial class ToolLocator
         {
             try
             {
-                await InstallFromAsync(client, s, ct);
+                await InstallFromAsync(client, s, OwnedFfmpegDir, [Exe("ffmpeg"), Exe("ffprobe")], ct);
                 return s.Label;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -358,21 +407,24 @@ public sealed partial class ToolLocator
         throw new InvalidOperationException(string.Join("; ", failures));
     }
 
-    private async Task InstallFromAsync(HttpClient client, FfmpegSource source, CancellationToken ct)
+    /// <summary>
+    /// Downloads and verifies every archive of <paramref name="source"/>, extracts the <paramref name="wanted"/>
+    /// files from them, and makes those files (and nothing else) the content of <paramref name="targetDir"/>.
+    /// </summary>
+    private async Task InstallFromAsync(HttpClient client, ToolSource source, string targetDir, string[] wanted, CancellationToken ct)
     {
         var archives = await ViaGitHubApiAsync(client, source.Archives, ct);
-        string[] wanted = [Exe("ffmpeg"), Exe("ffprobe")];
 
         // Build the folder under a temporary name and move it in at the end, so the app never
         // sees half an install.
-        var staging = OwnedFfmpegDir + ".download";
+        var staging = targetDir + ".download";
         if (Directory.Exists(staging)) Directory.Delete(staging, true);
         Directory.CreateDirectory(staging);
         try
         {
             foreach (var a in archives)
             {
-                _log.LogInformation("Downloading ffmpeg from {Source}: {Url}", source.Label, a.Url);
+                _log.LogInformation("Downloading {Tool} from {Source}: {Url}", wanted[0], source.Label, a.Url);
                 var zip = Path.Combine(staging, "archive.zip");
                 var sha = await DownloadVerifiedAsync(client, a, zip, ct);
                 ExtractNamed(zip, staging, wanted);
@@ -385,14 +437,14 @@ public sealed partial class ToolLocator
                 if (!File.Exists(p)) throw new InvalidOperationException($"{w} was not in the downloaded archive.");
                 MakeExecutable(p);
             }
-            if (Directory.Exists(OwnedFfmpegDir)) Directory.Delete(OwnedFfmpegDir, true);
+            if (Directory.Exists(targetDir)) Directory.Delete(targetDir, true);
             // On Windows, antivirus often scans a freshly written .exe for a moment, and the rename
             // fails until it lets go.
             for (var attempt = 1; ; attempt++)
             {
                 try
                 {
-                    Directory.Move(staging, OwnedFfmpegDir);
+                    Directory.Move(staging, targetDir);
                     break;
                 }
                 catch (Exception ex) when (attempt < 10 && ex is IOException or UnauthorizedAccessException)
@@ -406,30 +458,37 @@ public sealed partial class ToolLocator
             try { Directory.Delete(staging, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             throw;
         }
-        _log.LogInformation("ffmpeg saved to {Dir}", OwnedFfmpegDir);
+        _log.LogInformation("{Tool} saved to {Dir}", wanted[0], targetDir);
     }
 
     // ── GitHub release files ────────────────────────────────────────────────
 
-    internal sealed record GitHubFile(string Owner, string Repo, string Tag, string Name)
+    /// <summary>A file of a GitHub release; a null <paramref name="Tag"/> is the repo's latest release.</summary>
+    internal sealed record GitHubFile(string Owner, string Repo, string? Tag, string Name)
     {
-        public string ReleaseApiUrl => $"https://api.github.com/repos/{Owner}/{Repo}/releases/tags/{Tag}";
+        public string ReleaseApiUrl => Tag is null
+            ? $"https://api.github.com/repos/{Owner}/{Repo}/releases/latest"
+            : $"https://api.github.com/repos/{Owner}/{Repo}/releases/tags/{Tag}";
     }
 
-    [GeneratedRegex(@"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^https://github\.com/([^/]+)/([^/]+)/releases/(?:download/([^/]+)|latest/download)/([^/?#]+)$", RegexOptions.IgnoreCase)]
     private static partial Regex GitHubFileRx();
 
-    /// <summary>"https://github.com/{owner}/{repo}/releases/download/{tag}/{file}" → its parts; anything else → null.</summary>
+    /// <summary>
+    /// "https://github.com/{owner}/{repo}/releases/download/{tag}/{file}" or ".../releases/latest/download/{file}"
+    /// → its parts; anything else → null.
+    /// </summary>
     internal static GitHubFile? GitHubReleaseFile(string? url) =>
         url is not null && GitHubFileRx().Match(url) is { Success: true } m
-            ? new GitHubFile(m.Groups[1].Value, m.Groups[2].Value, Uri.UnescapeDataString(m.Groups[3].Value), Uri.UnescapeDataString(m.Groups[4].Value))
+            ? new GitHubFile(m.Groups[1].Value, m.Groups[2].Value,
+                m.Groups[3].Success ? Uri.UnescapeDataString(m.Groups[3].Value) : null, Uri.UnescapeDataString(m.Groups[4].Value))
             : null;
 
     /// <summary>
     /// Swaps each github.com release download URL for the same file's REST API URL. Since 2026-11-09 github.com
-    /// answers /releases/download/latest/… for yt-dlp/FFmpeg-Builds (thousands of daily releases) with 504
-    /// Gateway Time-out, while the API serves the same release. That costs one API call per release; the
-    /// files themselves still come from GitHub's download CDN.
+    /// answers /releases/download/… with 504 Gateway Time-out, first for yt-dlp/FFmpeg-Builds (thousands of
+    /// daily releases) and then for yt-dlp and deno too, while the API serves the same releases. That costs
+    /// one API call per release; the files themselves still come from GitHub's download CDN.
     /// </summary>
     private async Task<IReadOnlyList<ToolArchive>> ViaGitHubApiAsync(HttpClient client, IReadOnlyList<ToolArchive> archives, CancellationToken ct)
     {
@@ -451,7 +510,7 @@ public sealed partial class ToolLocator
             }
             return assets.TryGetValue(f.Name, out var api)
                 ? api
-                : throw new InvalidOperationException($"{f.Name} is not in the {f.Owner}/{f.Repo} release \"{f.Tag}\".");
+                : throw new InvalidOperationException($"{f.Name} is not in the {f.Owner}/{f.Repo} release \"{f.Tag ?? "latest"}\".");
         }
 
         var resolved = new List<ToolArchive>();
@@ -485,31 +544,150 @@ public sealed partial class ToolLocator
     [GeneratedRegex(@"(\d+)\.(\d+)(?:\.(\d+))?")]
     private static partial Regex SemverRx();
 
+    /// <summary>The runtimes yt-dlp supports, in its own order of preference.</summary>
+    internal static readonly string[] JsRuntimes = ["deno", "node", "bun", "quickjs"];
+
+    private string JsWanted => (_opt.Tools.JsRuntime ?? "auto").Trim().ToLowerInvariant();
+
+    /// <summary>deno may be downloaded only when the configuration would use it.</summary>
+    private bool DenoDownloadAllowed => _opt.Tools.AutoDownloadJsRuntime && JsWanted is "auto" or "deno";
+
+    /// <summary>"C:\tools\deno.exe" → deno, "/usr/bin/nodejs" → node, "qjs" → quickjs; null when the name says nothing.</summary>
+    internal static string? JsRuntimeFromFileName(string path) =>
+        Path.GetFileNameWithoutExtension(path.Trim().Replace('\\', '/').Split('/')[^1]).ToLowerInvariant() switch
+        {
+            "deno" => "deno",
+            "node" or "nodejs" => "node",
+            "bun" => "bun",
+            "qjs" or "quickjs" or "qjs-ng" or "quickjs-ng" => "quickjs",
+            _ => null,
+        };
+
+    /// <summary>
+    /// Tries, in order: Ydl:Tools:JsRuntimePath; the app's own deno ({Tools}/deno); whatever runtime is
+    /// installed (deno, node ≥ 22, bun, quickjs, as yt-dlp prefers them). If none of them works, it
+    /// downloads deno into the tools folder, which is the only option on a host where nothing can be
+    /// installed.
+    /// </summary>
     private async Task<ToolInfo> LocateJsRuntimeAsync(CancellationToken ct)
     {
-        var wanted = (_opt.Tools.JsRuntime ?? "auto").Trim().ToLowerInvariant();
-        if (wanted == "none") return new ToolInfo("none", null, null, "Disabled by configuration.");
+        var wanted = JsWanted;
+        if (wanted == "none") return new ToolInfo("none", null, null, "Disabled by configuration (Ydl:Tools:JsRuntime is \"none\").");
+        if (wanted != "auto" && !JsRuntimes.Contains(wanted))
+            return new ToolInfo("none", null, null, $"Ydl:Tools:JsRuntime \"{wanted}\" is not one of auto, {string.Join(", ", JsRuntimes)}, none.");
 
-        // yt-dlp's own priority order; node must be >= 22, deno >= 2.3.
-        var order = wanted == "auto" ? new[] { "deno", "node", "bun", "quickjs" } : [wanted];
-        foreach (var name in order)
+        string? problem = null;
+        if (_opt.Tools.JsRuntimePath?.Trim() is { Length: > 0 } configured)
         {
-            var exe = name == "quickjs" ? "qjs" : name;
-            var path = wanted != "auto" && !string.IsNullOrWhiteSpace(_opt.Tools.JsRuntimePath)
-                ? _opt.Tools.JsRuntimePath
-                : FindOnPath(exe) ?? (name == "deno" ? HomeBin(".deno", "bin", "deno") : null);
-            if (path is null) continue;
-            var line = await VersionOfAsync(path, name == "quickjs" ? ["--help"] : ["--version"], ct, anyExitCode: name == "quickjs");
-            if (line is null) continue;
-            var m = SemverRx().Match(line);
-            var version = m.Success ? m.Value : line;
-            var major = m.Success ? int.Parse(m.Groups[1].Value) : 0;
-            var minor = m.Success ? int.Parse(m.Groups[2].Value) : 0;
-            if (name == "node" && major < 22) { _log.LogWarning("node {Version} is too old for yt-dlp (needs >= 22)", version); continue; }
-            if (name == "deno" && (major < 2 || (major == 2 && minor < 3))) { _log.LogWarning("deno {Version} is too old (needs >= 2.3)", version); continue; }
-            return new ToolInfo(name, path, version);
+            var name = wanted != "auto" ? wanted : JsRuntimeFromFileName(configured);
+            if (name is null) problem = $"Can't tell which runtime {configured} is from its name; set Ydl:Tools:JsRuntime as well.";
+            else if (!File.Exists(configured)) problem = $"There is no file at {configured} (Ydl:Tools:JsRuntimePath).";
+            else
+            {
+                var info = await JsRuntimeInfoAsync(name, configured, ct);
+                if (info.Ok) return info;
+                problem = info.Note;
+            }
+            _log.LogWarning("Not using Ydl:Tools:JsRuntimePath: {Problem}", problem);
         }
-        return new ToolInfo("none", null, null, "Install deno (https://deno.com) or node >= 22 so yt-dlp can solve YouTube's JavaScript challenges.");
+
+        foreach (var name in wanted == "auto" ? JsRuntimes : [wanted])
+        {
+            string?[] candidates = name switch
+            {
+                "deno" => [File.Exists(OwnedDenoPath) ? OwnedDenoPath : null, Which("deno")],
+                "quickjs" => [Which("qjs")],
+                _ => [Which(name)],
+            };
+            foreach (var path in candidates.OfType<string>().Distinct())
+            {
+                var info = await JsRuntimeInfoAsync(name, path, ct);
+                if (info.Ok) return info;
+                _log.LogInformation("Skipping a JavaScript runtime: {Problem}", info.Note); // e.g. the old node a shared host ships
+                problem ??= info.Note;
+            }
+        }
+
+        if (!DenoDownloadAllowed)
+            return new ToolInfo("none", null, null, (problem is null ? "" : problem + " ") + (_opt.Tools.AutoDownloadJsRuntime
+                ? $"Install {wanted} so yt-dlp can solve YouTube's JavaScript challenges, or set Ydl:Tools:JsRuntimePath."
+                : "Install deno (https://deno.com) or node >= 22 so yt-dlp can solve YouTube's JavaScript challenges, or enable Ydl:Tools:AutoDownloadJsRuntime."));
+
+        var installed = await InstallDenoAsync(ct);
+        return installed.Ok || problem is null ? installed : installed with { Note = problem + " " + installed.Note };
+    }
+
+    /// <summary>Runs the runtime's version command; a runtime that won't run, or is older than yt-dlp accepts, has no path.</summary>
+    private async Task<ToolInfo> JsRuntimeInfoAsync(string name, string path, CancellationToken ct, string? note = null)
+    {
+        var (line, failure) = await ProbeToolAsync(path, name == "quickjs" ? ["--help"] : ["--version"], ct, anyExitCode: name == "quickjs");
+        if (line is null) return new ToolInfo(name, null, null, $"{name} at {path} won't run ({failure}).");
+        var m = SemverRx().Match(line);
+        var version = m.Success ? m.Value : line;
+        var (major, minor) = m.Success ? (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value)) : (0, 0);
+        // yt-dlp's minimums.
+        if (name == "node" && major < 22) return new ToolInfo(name, null, version, $"node {version} at {path} is too old (yt-dlp needs node 22 or later).");
+        if (name == "deno" && (major, minor) is (< 2, _) or (2, < 3)) return new ToolInfo(name, null, version, $"deno {version} at {path} is too old (yt-dlp needs deno 2.3 or later).");
+        return new ToolInfo(name, path, version, note);
+    }
+
+    /// <summary>deno's target triple for a platform (its release files are deno-{target}.zip); null when deno publishes no build.</summary>
+    internal static string? DenoTarget(OSPlatform os, Architecture arch)
+    {
+        var cpu = arch switch { Architecture.X64 => "x86_64", Architecture.Arm64 => "aarch64", _ => null };
+        if (cpu is null) return null;
+        if (os == OSPlatform.Windows) return $"{cpu}-pc-windows-msvc";
+        if (os == OSPlatform.OSX) return $"{cpu}-apple-darwin";
+        if (os == OSPlatform.Linux) return $"{cpu}-unknown-linux-gnu";
+        return null;
+    }
+
+    [GeneratedRegex(@"^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")]
+    private static partial Regex DenoVersionRx();
+
+    /// <summary>
+    /// Downloads deno from <see cref="ToolOptions.DenoReleaseBase"/> (dl.deno.land, the server deno's own
+    /// install scripts use, not github.com, whose release route has been timing out) into {Tools}/deno,
+    /// checks its SHA-256 against the .sha256sum beside it, and checks that it runs. A 32-bit app pool on
+    /// 64-bit Windows still gets the 64-bit build, because deno runs as a separate process.
+    /// </summary>
+    internal async Task<ToolInfo> InstallDenoAsync(CancellationToken ct)
+    {
+        var host = "deno's download server";
+        try
+        {
+            var target = DenoTarget(CurrentOs, RuntimeInformation.OSArchitecture)
+                ?? throw new PlatformNotSupportedException($"deno publishes no build for {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}).");
+            var b = _opt.Tools.DenoReleaseBase.Trim().TrimEnd('/') + "/";
+            host = new Uri(b).Host;
+            var client = _http.CreateClient("tools");
+
+            var version = _opt.Tools.DenoVersion?.Trim() is { Length: > 0 } pin && !pin.Equals("latest", StringComparison.OrdinalIgnoreCase)
+                ? (pin.StartsWith('v') ? pin : "v" + pin)
+                : await ReadTextAsync(client, b + "release-latest.txt", ct);
+            if (!DenoVersionRx().IsMatch(version))
+                throw new InvalidOperationException($"\"{(version.Length > 40 ? version[..40] + "…" : version)}\" is not a deno version.");
+
+            var zip = $"deno-{target}.zip";
+            var url = $"{b}release/{version}/{zip}";
+            await InstallFromAsync(client, new ToolSource(host, [new ToolArchive(url, url + ".sha256sum", zip)]), OwnedDenoDir, [Exe("deno")], ct);
+            var info = await JsRuntimeInfoAsync("deno", OwnedDenoPath, ct, $"Downloaded deno {version} from {host} (SHA-256 verified).");
+            return info.Ok ? info : info with { Name = "none", Note = "Downloaded deno, but " + info.Note };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _log.LogError(ex, "Could not download deno");
+            return new ToolInfo("none", null, null,
+                $"The automatic deno download from {host} failed ({ex.Message}). The app keeps retrying in the background. " +
+                $"You can also upload deno yourself: put {Exe("deno")} from https://github.com/denoland/deno/releases into {OwnedDenoDir}, " +
+                "or set Ydl:Tools:JsRuntimePath.");
+        }
+    }
+
+    private async Task<string> ReadTextAsync(HttpClient client, string url, CancellationToken ct)
+    {
+        using var resp = await GetAsync(client, url, ct);
+        return (await resp.Content.ReadAsStringAsync(ct)).Trim();
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -600,23 +778,15 @@ public sealed partial class ToolLocator
                 UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
     }
 
-    private static string? HomeBin(params string[] parts)
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrEmpty(home)) return null;
-        var p = Path.Combine([home, .. parts]) + (IsWindows ? ".exe" : "");
-        return File.Exists(p) ? p : null;
-    }
-
     /// <summary>PATH lookup plus the usual install folders (IDE-launched apps often get a thin PATH on macOS).</summary>
     internal static string? FindOnPath(string name)
     {
         var dirs = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).ToList();
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (!IsWindows)
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            dirs.AddRange(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", Path.Combine(home, ".local", "bin"), Path.Combine(home, ".deno", "bin")]);
-        }
+            dirs.AddRange(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]);
+        if (!string.IsNullOrEmpty(home))
+            dirs.AddRange([Path.Combine(home, ".local", "bin"), Path.Combine(home, ".deno", "bin")]); // deno's installer puts it in ~/.deno/bin
         var exts = IsWindows
             ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT").Split(';', StringSplitOptions.RemoveEmptyEntries)
             : [""];
@@ -667,13 +837,13 @@ public sealed partial class ToolLocator
 }
 
 /// <summary>
-/// Detects tools at start-up (without blocking it), keeps yt-dlp updated, and while ffmpeg is missing
-/// tries its download again: 10 minutes after a failure, then twice as long each time, up to 6 hours.
+/// Detects tools at start-up (without blocking it), keeps yt-dlp updated, and while ffmpeg or deno is
+/// missing tries the download again: 10 minutes after a failure, then twice as long each time, up to 6 hours.
 /// </summary>
 public sealed class ToolMaintenanceService(ToolLocator tools, IOptions<YdlOptions> opt, ILogger<ToolMaintenanceService> log) : BackgroundService
 {
-    internal static readonly TimeSpan FfmpegRetryFirst = TimeSpan.FromMinutes(10);
-    internal static readonly TimeSpan FfmpegRetryMax = TimeSpan.FromHours(6);
+    internal static readonly TimeSpan RetryFirst = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan RetryMax = TimeSpan.FromHours(6);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -681,8 +851,8 @@ public sealed class ToolMaintenanceService(ToolLocator tools, IOptions<YdlOption
         var o = opt.Value.Tools;
         var interval = TimeSpan.FromHours(Math.Max(1, o.UpdateIntervalHours));
         var nextUpdate = o.AutoUpdateYtDlp ? DateTimeOffset.UtcNow : DateTimeOffset.MaxValue;
-        var ffmpegWait = FfmpegRetryFirst;
-        var nextFfmpeg = DateTimeOffset.UtcNow + ffmpegWait;
+        var retryWait = RetryFirst;
+        var nextRetry = DateTimeOffset.UtcNow + retryWait;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -699,27 +869,27 @@ public sealed class ToolMaintenanceService(ToolLocator tools, IOptions<YdlOption
                 nextUpdate = DateTimeOffset.UtcNow + interval;
             }
 
-            var ffmpegMissing = o.AutoDownloadFfmpeg && !tools.Status.Ffmpeg.Ok;
-            if (ffmpegMissing && DateTimeOffset.UtcNow >= nextFfmpeg)
+            var missing = tools.MissingDownloads();
+            if (missing.Count > 0 && DateTimeOffset.UtcNow >= nextRetry)
             {
-                log.LogInformation("ffmpeg is still missing; trying the download again");
+                log.LogInformation("Still missing: {Tools}; trying the download again", string.Join(", ", missing));
                 try
                 {
-                    ffmpegMissing = !(await tools.RetryFfmpegAsync(stoppingToken)).Ok;
+                    missing = await tools.RetryMissingAsync(stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    log.LogWarning(ex, "ffmpeg retry failed");
+                    log.LogWarning(ex, "Tool download retry failed");
                 }
-                if (ffmpegMissing)
+                if (missing.Count > 0)
                 {
-                    ffmpegWait = TimeSpan.FromTicks(Math.Min(ffmpegWait.Ticks * 2, FfmpegRetryMax.Ticks));
-                    log.LogWarning("ffmpeg is still missing; next try in {Wait}", ffmpegWait);
+                    retryWait = TimeSpan.FromTicks(Math.Min(retryWait.Ticks * 2, RetryMax.Ticks));
+                    log.LogWarning("Still missing: {Tools}; next try in {Wait}", string.Join(", ", missing), retryWait);
                 }
-                nextFfmpeg = DateTimeOffset.UtcNow + ffmpegWait;
+                nextRetry = DateTimeOffset.UtcNow + retryWait;
             }
 
-            var next = ffmpegMissing && nextFfmpeg < nextUpdate ? nextFfmpeg : nextUpdate;
+            var next = missing.Count > 0 && nextRetry < nextUpdate ? nextRetry : nextUpdate;
             if (next == DateTimeOffset.MaxValue) return; // nothing left to do
             var wait = next - DateTimeOffset.UtcNow;
             if (wait > TimeSpan.Zero) await Task.Delay(wait, stoppingToken);

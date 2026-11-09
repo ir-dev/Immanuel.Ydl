@@ -6,8 +6,8 @@
 | **Session ID** | `29b02f75-4a23-4831-a602-d02a80302d01` |
 | **Working Dir** | `/Users/Immanuel.Raj/Immi/git_src/Immanuel.Ydl` |
 | **Started** | 09/11/2026, 10:52:42 |
-| **Last Updated** | 09/11/2026, 11:10:30 |
-| **Messages** | 107 |
+| **Last Updated** | 09/11/2026, 11:30:05 |
+| **Messages** | 117 |
 
 ---
 
@@ -1622,6 +1622,194 @@ I also checked against the real GitHub: the live checksum file, fetched the new 
 **If you need ffmpeg before redeploying:** with the current build, set `Ydl:Tools:FfmpegWindowsReleaseBase` to `https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-11-08-18-52/` and restart the app pool. That dated link answered 200 here, though it took about 30 seconds to start. Otherwise, install ffmpeg yourself and set `Ydl:Tools:FfmpegPath`. I haven't changed anything on the server.
 
 Nothing is committed. The changes are in the two source files above, [FfmpegInstallTests.cs](tests/Ark.Ydl.Tests/FfmpegInstallTests.cs) and [README.md](README.md), and I added the incident to the project memory.
+
+
+---
+
+## User <sup>09/11/2026, 11:29:14</sup>
+
+<ide_opened_file>The user opened the file /Users/Immanuel.Raj/Immi/git_src/Immanuel.Ydl/Immanuel.Yt/ark-ydl/src/Ark.Ydl/Tools/ToolLocator.cs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+
+ok, do I use dotnet publish or specific to windows?
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:29:24</sup>
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:29:25</sup>
+
+<details>
+<summary>Tool: <code>Bash</code></summary>
+
+```json
+{
+  "command": "ls -a .vscode ../../.vscode 2>/dev/null; grep -n -i -B2 -A25 'publish' .vscode/tasks.json 2>/dev/null | head -60; cat src/Ark.Ydl/Ark.Ydl.csproj; ls src/Ark.Ydl; grep -n -i -A12 'iis\\|publish' README.md | head -60",
+  "description": "Find the existing IIS publish task and project settings"
+}
+```
+
+</details>
+
+
+---
+
+## User <sup>09/11/2026, 11:29:27</sup>
+
+<details>
+<summary>Tool Result</summary>
+
+```
+../../.vscode:
+.
+..
+launch.json
+settings.json
+tasks.json
+
+.vscode:
+.
+..
+launch.json
+tasks.json
+40-    {
+41-      // Output for Windows IIS (see key_points.txt): framework-dependent win-x64, in-process web.config.
+42:      "label": "ark-ydl: publish for IIS (win-x64)",
+43-      "type": "process",
+44-      "command": "dotnet",
+45-      "args": [
+46:        "publish",
+47-        "${workspaceFolder}/src/Ark.Ydl/Ark.Ydl.csproj",
+48-        "-c",
+49-        "Release",
+50-        "-r",
+51-        "win-x64",
+52-        "--self-contained",
+53-        "false",
+54-        "-o",
+55:        "${workspaceFolder}/src/Ark.Ydl/bin/publish/iis",
+56-        "/property:GenerateFullPaths=true",
+57-        "/consoleloggerparameters:NoSummary;ForceNoAlign"
+58-      ],
+59-      "problemMatcher": "$msCompile"
+60-    }
+61-  ]
+62-}
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    
+...(truncated)
+```
+
+</details>
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:29:36</sup>
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:29:36</sup>
+
+The repo already has a Windows publish set up in the "ark-ydl: publish for IIS (win-x64)" VS Code task. Running it here to make sure it still publishes from the Mac:
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:29:38</sup>
+
+<details>
+<summary>Tool: <code>Bash</code></summary>
+
+```json
+{
+  "command": "dotnet publish src/Ark.Ydl/Ark.Ydl.csproj -c Release -r win-x64 --self-contained false -o src/Ark.Ydl/bin/publish/iis 2>&1 | tail -3; ls src/Ark.Ydl/bin/publish/iis | head -30; grep -o 'hostingModel=\"[a-z]*\"' src/Ark.Ydl/bin/publish/iis/web.config; ls src/Ark.Ydl/bin/publish/iis/App_Data 2>&1 | head -2",
+  "description": "Publish the app for Windows IIS and list the output",
+  "timeout": 300000
+}
+```
+
+</details>
+
+
+---
+
+## User <sup>09/11/2026, 11:29:57</sup>
+
+<details>
+<summary>Tool Result</summary>
+
+```
+Restored /Users/Immanuel.Raj/Immi/git_src/Immanuel.Ydl/Immanuel.Yt/ark-ydl/src/Ark.Ydl/Ark.Ydl.csproj (in 15 sec).
+  Ark.Ydl -> /Users/Immanuel.Raj/Immi/git_src/Immanuel.Ydl/Immanuel.Yt/ark-ydl/src/Ark.Ydl/bin/Release/net10.0/win-x64/Ark.Ydl.dll
+  Ark.Ydl -> /Users/Immanuel.Raj/Immi/git_src/Immanuel.Ydl/Immanuel.Yt/ark-ydl/src/Ark.Ydl/bin/publish/iis/
+Ark.Ydl.deps.json
+Ark.Ydl.dll
+Ark.Ydl.exe
+Ark.Ydl.pdb
+Ark.Ydl.runtimeconfig.json
+Ark.Ydl.staticwebassets.endpoints.json
+Ark.oAuth.Client.dll
+Bogus.dll
+BouncyCastle.Cryptography.dll
+CsvHelper.dll
+MailKit.dll
+Microsoft.AspNetCore.Authentication.JwtBearer.dll
+Microsoft.AspNetCore.Authentication.OpenIdConnect.dll
+Microsoft.IdentityModel.Abstractions.dll
+Microsoft.IdentityModel.JsonWebTokens.dll
+Microsoft.IdentityModel.Logging.dll
+Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
+Microsoft.IdentityModel.Protocols.dll
+Microsoft.IdentityModel.Tokens.dll
+MimeKit.dll
+System.IdentityModel.Tokens.Jwt.dll
+System.Security.Cryptography.Pkcs.dll
+app
+...(truncated)
+```
+
+</details>
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:30:05</sup>
+
+
+---
+
+## Assistant <sup>09/11/2026, 11:30:05</sup>
+
+Use `dotnet publish`, aimed at Windows. I just ran it here and it built fine:
+
+```bash
+cd Immanuel.Yt/ark-ydl
+dotnet publish src/Ark.Ydl/Ark.Ydl.csproj -c Release -r win-x64 --self-contained false -o src/Ark.Ydl/bin/publish/iis
+```
+
+- **`-r win-x64`** builds it for Windows. You can run this from the Mac.
+- **`--self-contained false`** leaves .NET itself out of the package and uses the .NET 10 Hosting Bundle already installed on the server.
+
+The same command is in VS Code as the task **"ark-ydl: publish for IIS (win-x64)"**. The output folder `src/Ark.Ydl/bin/publish/iis/` has the `web.config` IIS needs.
+
+**Deploying it:**
+1. **Stop the site's app pool**, or put an `app_offline.htm` file in the site folder. Otherwise IIS keeps `Ark.Ydl.dll` locked and the copy fails.
+2. **Copy the publish folder's contents over the site folder.**
+   - **Keep the server's `App_Data`.** It isn't in the publish output and it holds the downloaded tools, including yt-dlp. If your copy or sync tool deletes files that aren't in the source, exclude `App_Data`.
+   - **The copy overwrites `appsettings.json`.** If you edited it on the server, copy those edits into the new file or move them to environment variables in `web.config`.
+3. **Start the app pool and open the site.** The ffmpeg download (about 200 MB) starts in the background. Within a few minutes the banner should go away, and `/api/system` should show ffmpeg `ok: true`, downloaded from `github.com/yt-dlp/FFmpeg-Builds`. If it says `www.gyan.dev` instead, GitHub failed and the backup source was used.
+
+`appsettings.Development.json` is also in the output, but the server ignores it unless `ASPNETCORE_ENVIRONMENT` is set to `Development`.
 
 
 ---

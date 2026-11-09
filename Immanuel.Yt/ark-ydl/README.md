@@ -17,7 +17,8 @@ ark-ydl delegates extraction to **yt-dlp**, which is maintained daily, and:
 
 - finds yt-dlp, or downloads the official release and **verifies its SHA-256**;
 - **updates yt-dlp itself** on start and every 24 h (`yt-dlp -U`) when the binary is its own;
-- passes a **JavaScript runtime** (deno, else node ≥ 22) via `--js-runtimes`;
+- passes a **JavaScript runtime** (deno, else node ≥ 22) via `--js-runtimes`, and downloads deno
+  itself when the machine has none, so it also runs on shared hosting where nothing can be installed;
 - turns yt-dlp's errors into sentences a user can act on (bot check, private, age-restricted, …).
 
 ## What a user can do
@@ -39,11 +40,12 @@ Choices (format, quality, codec, toggles…) are remembered in the browser.
 
 ## Run it locally
 
-Prerequisites: .NET 10 SDK and **deno** (recommended) or **node ≥ 22**.
+Prerequisites: .NET 10 SDK. Nothing else has to be installed.
 On first start the app downloads what it is missing into `src/Ark.Ydl/App_Data/tools`, checking the
 SHA-256 of each file:
 
-* **yt-dlp**: the official release, if it is not on `PATH`. The app keeps it updated.
+* **yt-dlp**: the official release, if it is not on `PATH`, fetched through the GitHub REST API like
+  ffmpeg's below. The app keeps it updated.
 * **ffmpeg + ffprobe**: a self-contained static build (in `tools/ffmpeg/`), used when no ffmpeg on
   this machine works. macOS and Linux get [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de)
   release builds (arm64 and x64); Windows gets [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds),
@@ -52,10 +54,14 @@ SHA-256 of each file:
   essentials build. Each request is retried on a timeout or a 408/429/5xx answer. If every source fails,
   the app tries again in the background (10 min, then doubling, up to every 6 h) until one works.
   It takes about 60 MB (about 200 MB on Windows), once. Delete the folder to fetch a newer build.
+* **deno** (in `tools/deno/`): the JavaScript runtime yt-dlp needs for YouTube, used when no deno ≥ 2.3
+  or node ≥ 22 works on this machine. It comes from [dl.deno.land](https://dl.deno.land), the server
+  deno's own install scripts use (not github.com), with the `.zip.sha256sum` beside each file. It is a
+  single file: a 43 MB download, about 100 MB on disk. It is retried in the background like ffmpeg.
 
 ```bash
 dotnet run --project src/Ark.Ydl          # http://localhost:5080
-dotnet test                               # 172 tests
+dotnet test                               # 198 tests
 ```
 
 In VS Code, **F5** (`ark-ydl (http)`, or `ark-ydl (https)` after `dotnet dev-certs https --trust`)
@@ -87,6 +93,38 @@ Push the image to ACR and point the web app at it; set `WEBSITES_PORT=8080`. Con
 environment variables (`Ydl__RetentionMinutes=60`, `Ydl__CookiesFile=/home/cookies.txt`, …). The
 `aas-deploy` skill can generate the `az acr build` / slot commands.
 
+## Shared hosting (Windows / IIS)
+
+Publish with the "publish for IIS (win-x64)" task and upload it. Nothing has to be installed on the
+server. On the first start the app fetches yt-dlp, ffmpeg and deno into `App_Data\tools` (about
+320 MB in all) and keeps yt-dlp current. The page shows *Getting the download engine ready* until
+that is done. What the host has to allow:
+
+* **Write access to `App_Data`** for the app-pool account (or set `Ydl:DataRoot` to a folder it can
+  write). Tools, downloads and caches all live there. deno's cache is pointed at `App_Data\cache\deno`,
+  because an app-pool account usually has no user profile to keep one in.
+* **Starting programs from that folder**, which yt-dlp needs anyway. A 32-bit app pool is fine: the
+  tools run as their own 64-bit processes.
+* **Outbound HTTPS** to `api.github.com` and `release-assets.githubusercontent.com` (yt-dlp,
+  ffmpeg), `www.gyan.dev` (ffmpeg fallback) and `dl.deno.land` (deno). A failed download is retried in
+  the background (10 min, then doubling, up to every 6 h), so a blip at start-up fixes itself.
+
+If the host blocks those downloads, upload the files yourself over FTP or the file manager. The app
+picks them up on its next start, and ffmpeg and deno also at the next background retry:
+
+```
+App_Data\tools\yt-dlp.exe              github.com/yt-dlp/yt-dlp/releases          yt-dlp.exe
+App_Data\tools\ffmpeg\ffmpeg.exe       gyan.dev ffmpeg-release-essentials.zip     bin\ffmpeg.exe
+App_Data\tools\ffmpeg\ffprobe.exe        (same zip)                               bin\ffprobe.exe
+App_Data\tools\deno\deno.exe           dl.deno.land/release/v2.9.8/deno-x86_64-pc-windows-msvc.zip
+```
+
+Files kept anywhere else are used through `Ydl:Tools:YtDlpPath`, `FfmpegPath` and `JsRuntimePath`.
+Set them in `appsettings.json`, or as `<environmentVariable name="Ydl__Tools__JsRuntimePath"
+value="…"/>` in `web.config`. A node ≥ 22 the host already provides works too (`JsRuntimePath` to its
+`node.exe`). The older node many Windows hosts ship for iisnode is skipped. `/api/system` (or the pill
+in the top bar) shows what was found, and when something is missing its `note` says why.
+
 ## Configuration (`Ydl` section)
 
 | Key | Default | Meaning |
@@ -109,7 +147,9 @@ environment variables (`Ydl__RetentionMinutes=60`, `Ydl__CookiesFile=/home/cooki
 | `ExtraArgs` | [] | Admin-only extra yt-dlp arguments, e.g. `["--extractor-args","youtube:player_client=default"]`. |
 | `RateLimit:ProbesPerMinute` / `JobsPerMinute` | 30 / 20 | Per client. |
 | `Tools:YtDlpPath` / `FfmpegPath` | auto | Explicit tool paths. |
-| `Tools:JsRuntime` / `JsRuntimePath` | `auto` | `deno`, `node`, `bun`, `quickjs` or `none`. |
+| `Tools:JsRuntime` / `JsRuntimePath` | `auto` | `deno`, `node`, `bun`, `quickjs` or `none`. A `JsRuntimePath` is tried first; with `auto` its file name says which runtime it is (`deno.exe`, `node`, `qjs`). |
+| `Tools:AutoDownloadJsRuntime` | true | Fetch deno into `{tools}/deno` when no runtime that works is found (only with `JsRuntime` `auto` or `deno`). |
+| `Tools:DenoReleaseBase` / `DenoVersion` | `https://dl.deno.land/` / `latest` | deno download server (for a mirror) and version (`2.9.8` pins one). |
 | `Tools:AutoDownloadYtDlp` | true | Fetch the official release when none is found. |
 | `Tools:AutoDownloadFfmpeg` | true | Fetch a static ffmpeg + ffprobe into `{tools}/ffmpeg` when none that works is found. |
 | `Tools:FfmpegReleaseBase` / `FfmpegWindowsReleaseBase` | martin-riedl.de / yt-dlp FFmpeg-Builds | Download sources (for a mirror). Empty `FfmpegWindowsReleaseBase` skips it. |
@@ -121,7 +161,8 @@ environment variables (`Ydl__RetentionMinutes=60`, `Ydl__CookiesFile=/home/cooki
 YouTube challenges traffic from datacenter IPs far more than from home connections, so a cloud host
 will hit this sooner or later. In order of effort:
 
-1. Keep yt-dlp current (automatic) and keep a JS runtime installed (deno is in the image).
+1. Keep yt-dlp current and a JS runtime available. Both are automatic: deno is in the image, and
+   anywhere else the app downloads it.
 2. Lower the load: fewer `MaxConcurrentJobs`, shorter playlists, enable sign-in (below).
 3. `Ydl:CookiesFile`: export `cookies.txt` from a **throwaway** YouTube account logged in in a
    private window (see the yt-dlp wiki *Extractors → Exporting YouTube cookies*). Cookies also unlock

@@ -105,8 +105,27 @@ public sealed class ToolOptions
     /// <summary>auto | deno | node | bun | quickjs | none. YouTube needs one since yt-dlp 2025.11.</summary>
     public string JsRuntime { get; set; } = "auto";
 
-    /// <summary>Explicit path to the JS runtime binary.</summary>
+    /// <summary>
+    /// Explicit path to the JS runtime binary, tried first. With JsRuntime "auto" the runtime is told
+    /// by the file name (deno.exe → deno, node → node, qjs → quickjs).
+    /// </summary>
     public string? JsRuntimePath { get; set; }
+
+    /// <summary>
+    /// When no JS runtime is found (and JsRuntime is auto or deno), download deno (one self-contained
+    /// file, SHA-256 verified) into {Tools}/deno. It needs no install and no admin rights, so it also
+    /// works on shared hosting.
+    /// </summary>
+    public bool AutoDownloadJsRuntime { get; set; } = true;
+
+    /// <summary>
+    /// deno's own download server (what its install scripts use): {base}release-latest.txt names the newest
+    /// version, and {base}release/{version}/deno-{target}.zip has a .zip.sha256sum beside it.
+    /// </summary>
+    public string DenoReleaseBase { get; set; } = "https://dl.deno.land/";
+
+    /// <summary>"latest", or a version to pin, e.g. "2.9.8".</summary>
+    public string? DenoVersion { get; set; } = "latest";
 
     /// <summary>Download the official yt-dlp release (SHA-256 verified) when none is found.</summary>
     public bool AutoDownloadYtDlp { get; set; } = true;
