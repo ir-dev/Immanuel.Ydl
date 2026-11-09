@@ -8,3 +8,6 @@ App_Data/
 .idea/
 *.user
 TestResults/
+
+# Production overrides hold secrets (Ydl:Admin:Key) - never commit
+appsettings.Production.json
