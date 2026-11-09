@@ -1,5 +1,14 @@
 
+deployed url: https://ark-ydl.immanuel.co/
+deployed local projcet : ./Immanuel.Ydl/Immanuel.Yt/ark-ydl/src/Ark.Ydl
 
+dotnet publish -r win-x64
+
+
+
+
+
+-----------------
 
 ark-ydl - deploy to a Windows IIS server
 ==========================================
