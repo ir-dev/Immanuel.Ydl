@@ -147,11 +147,19 @@ overwrites it.
          "Tools": {
            "JsRuntime": "deno",
            "JsRuntimePath": "C:\\ark-ydl\\deno\\deno.exe"
-         }
+         },
+         "Admin": { "Key": "<a random secret, 16+ characters>" }
        }
      }
 
 * Backslashes are doubled in JSON.
+* Admin:Key opens the admin console at /admin (audit reports). Generate one with
+     $b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+  Without it the console stays locked; auditing still runs. The audit database is
+  C:\ark-ydl\data\audit\ark-ydl-audit.db, outside site\, so step 5's /MIR never touches it.
+  The GeoIP file (C:\ark-ydl\data\geoip, about 130 MB) is fetched from download.db-ip.com once a month.
+  Use "Audit": { "GeoIp": { "Edition": "country" } } for 8 MB, or "Enabled": false to skip it.
+  The pool must be 64-bit (the default) for the audit database's native SQLite library.
 * JsRuntime must name the runtime ("deno" or "node"). With "auto", JsRuntimePath is ignored.
 * No FfmpegPath: the app uses its own copy in data\tools\ffmpeg\ (step 1c). A server that already
   has "FfmpegPath": "C:\\ark-ydl\\ffmpeg\\bin\\ffmpeg.exe" keeps working. Drop the line and that
@@ -191,6 +199,9 @@ a) https://ydl.example.com/healthz
    "starting" = still detecting tools (on the very first start it is also downloading yt-dlp.exe and
    ffmpeg into C:\ark-ydl\data\tools, a minute or two). "degraded" = a tool is missing.
 b) https://ydl.example.com/api/system -> ok/version/note for each tool; "note" says why one wasn't found.
+   https://ydl.example.com/api/version -> "version", "manifest" and "latest" (and updateAvailable).
+   https://ydl.example.com/admin -> sign in with Admin:Key; System tab: audit store "ready",
+   IP geolocation "ready" a minute or two after the first start.
 c) Real end-to-end test: paste a short YouTube video, download it as video, then as MP3. This is
    the first run against real YouTube; development only ever used a yt-dlp stub. The progress bar
    should move smoothly. If it jumps from 0 to done, SSE is being buffered: check the

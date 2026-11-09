@@ -1,12 +1,33 @@
 // Thin wrapper over the ark-ydl HTTP API. Errors surface as Error(message) with .status / .detail.
+import { CLIENT_VERSION } from './version.js';
 
-async function request(method, url, body) {
+// What the page tells the server about itself, for the audit log: time zone, screen, installed-app or tab, page version.
+let clientHeader = null;
+export function clientInfo() {
+  if (clientHeader) return clientHeader;
+  const p = new URLSearchParams();
+  try { const tz = Intl.DateTimeFormat().resolvedOptions().timeZone; if (tz) p.set('tz', tz); } catch { /* old browser */ }
+  try {
+    p.set('sw', String(Math.round(screen.width)));
+    p.set('sh', String(Math.round(screen.height)));
+    p.set('dpr', String(Math.round((window.devicePixelRatio || 1) * 100) / 100));
+  } catch { /* no screen */ }
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  p.set('pwa', standalone ? '1' : '0');
+  p.set('v', CLIENT_VERSION);
+  clientHeader = p.toString();
+  return clientHeader;
+}
+
+export async function request(method, url, body) {
   let res;
   try {
+    const headers = { 'X-Ark-Client': clientInfo() };
+    if (body) headers['Content-Type'] = 'application/json';
     res = await fetch(url, {
       method,
       credentials: 'same-origin',
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -33,6 +54,9 @@ async function request(method, url, body) {
 
 export const api = {
   system: () => request('GET', '/api/system'),
+  version: () => request('GET', '/api/version'),
+  releases: () => request('GET', '/api/releases'),
+  migration: (from) => request('GET', `/api/releases/migration?from=${encodeURIComponent(from)}`),
   probe: (url, playlist = null) => request('POST', '/api/probe', { url, playlist }),
   createJob: (req) => request('POST', '/api/jobs', req),
   job: (id) => request('GET', `/api/jobs/${encodeURIComponent(id)}`),

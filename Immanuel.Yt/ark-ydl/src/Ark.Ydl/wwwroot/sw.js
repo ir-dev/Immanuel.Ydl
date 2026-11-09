@@ -1,7 +1,9 @@
 // ark-ydl service worker: makes the app installable and keeps the shell usable on a flaky
 // connection. Network first, always — the API and downloads are never cached.
-const CACHE = 'ark-ydl-shell-v2';
+// Named after the release (ReleaseTests keeps it equal to <Version>), so each release re-caches the shell once.
+const CACHE = 'ark-ydl-shell-1.1.0';
 const SHELL = ['/', '/css/app.css', '/js/app.js', '/js/util.js', '/js/api.js', '/js/clip.js', '/js/jobs.js',
+  '/js/release.js', '/js/version.js',
   '/img/mark.svg', '/img/icon.svg', '/img/favicon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -18,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/signin') || url.pathname.startsWith('/signout')) return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/signin') || url.pathname.startsWith('/signout')) return;
   const isShell = req.mode === 'navigate' || SHELL.includes(url.pathname);
   if (!isShell) return;
   e.respondWith(

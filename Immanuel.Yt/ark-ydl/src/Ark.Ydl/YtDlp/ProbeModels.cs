@@ -27,6 +27,12 @@ public sealed class ProbeResult
     public string? Track { get; set; }
     public string? Album { get; set; }
     public List<string> Tags { get; set; } = [];
+    /// <summary>YouTube's category for the video ("Music", "Gaming", "Education"…) — what the audit log calls its genre.</summary>
+    public List<string> Categories { get; set; } = [];
+    /// <summary>A music genre, where the site gives one.</summary>
+    public string? Genre { get; set; }
+    public string? ChannelId { get; set; }
+    public string? Language { get; set; }
 
     public List<ChapterInfo> Chapters { get; set; } = [];
     public List<HeatPoint> Heatmap { get; set; } = [];

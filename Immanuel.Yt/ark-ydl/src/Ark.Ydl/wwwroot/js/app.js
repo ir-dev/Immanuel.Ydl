@@ -6,6 +6,7 @@ import {
 import { api } from './api.js';
 import { ClipEditor, describeSections } from './clip.js';
 import { JobList, askNotificationPermission } from './jobs.js';
+import { ReleaseInfo } from './release.js';
 
 // ── constants ─────────────────────────────────────────────────────────────
 const PREFS_KEY = 'ydl.prefs.v1';
@@ -63,6 +64,7 @@ const S = {
 };
 let probeSeq = 0;
 let jobs;
+let release;
 
 function pick(o, keys) { return Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]])); }
 // A mode picked *for* the user (music → audio, no subtitles → video) is not their preference;
@@ -84,6 +86,7 @@ function init() {
     onRetry: (request, meta) => startDownload(request, meta),
   });
   jobs.restore();
+  release = new ReleaseInfo({ chip: $('#btn-version'), dialog: $('#release-dlg'), body: $('#release-body'), banner: $('#ver-banner') });
   bindGlobal();
   bindResult();
   loadSystem();
@@ -121,11 +124,19 @@ function renderSystem() {
   pill.className = 'pill' + (!t.ytDlp.ok ? ' err' : !t.ffmpeg.ok || !t.jsRuntime.ok ? ' warn' : '');
   pill.textContent = s.preparing ? 'starting…' : t.ytDlp.ok ? `yt-dlp ${t.ytDlp.version}` : 'engine missing';
   pill.title = [
+    s.release ? `ARK-RAPID v${s.release.version}${s.release.updateAvailable ? ` (v${s.release.latest.version} available)` : ''}` : '',
     `yt-dlp: ${t.ytDlp.version || 'missing'}`,
     `ffmpeg: ${t.ffmpeg.version || 'missing'}`,
     `JS runtime: ${t.jsRuntime.ok ? `${t.jsRuntime.name} ${t.jsRuntime.version}` : 'missing'}`,
-  ].join('\n');
-  $('#app-version').textContent = s.version ? `v${s.version}` : '';
+  ].filter(Boolean).join('\n');
+  release.update(s.release);
+  const note = $('#audit-note');
+  if (s.audit?.enabled) {
+    note.hidden = false;
+    note.textContent = 'Requests and downloads are logged (link, device, approximate location and IP address'
+      + (s.audit.ipMode === 'masked' ? ', shortened' : s.audit.ipMode === 'hashed' ? ', hashed' : '')
+      + ') to prevent abuse and to improve the service.';
+  }
 
   if (s.preparing) showBanner('warn', 'Getting the download engine ready — on the first start this downloads yt-dlp (and ffmpeg and deno if the server has none). One moment…');
   else if (!t.ytDlp.ok) showBanner('err', `The download engine (yt-dlp) isn't available on this server. ${t.ytDlp.note || ''}`);

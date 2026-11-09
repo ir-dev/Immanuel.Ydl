@@ -62,6 +62,12 @@ public static class YtDlpArgs
             "-P", "temp:" + Path.Combine(jobDir, ".tmp"),
         ]);
         if (!string.IsNullOrWhiteSpace(o.MaxFileSize)) a.AddRange(["--max-filesize", o.MaxFileSize.Trim()]);
+        if (o.Audit.Enabled && o.Audit.CaptureItemMetadata)
+        {
+            // One JSON line per item (genre, channel, duration…) for the audit log. The file name is an output
+            // template too, so a literal % in the path is doubled. Unlike --print, this implies neither --quiet nor --simulate.
+            a.AddRange(["--print-to-file", "video:" + ItemMetadata.Template, ItemMetadata.PathFor(jobDir).Replace("%", "%%")]);
+        }
 
         var playlist = IsPlaylist(r, url);
         if (playlist)

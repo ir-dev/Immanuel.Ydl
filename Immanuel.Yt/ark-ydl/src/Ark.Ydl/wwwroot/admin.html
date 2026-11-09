@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ARK-RAPID · Admin console</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#081525" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/admin.css">
+  <script type="module" src="/js/admin.js"></script>
+</head>
+<body class="admin">
+  <header class="topbar">
+    <div class="wrap admin-top topbar-inner">
+      <a class="brand" href="/" aria-label="ARK-RAPID, back to the downloader">
+        <svg class="brand-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+        <span class="brand-text" aria-hidden="true">
+          <svg class="brand-word"><use href="/img/mark.svg#wordmark" width="100%" height="100%"/></svg>
+          <span class="brand-tag">Admin console</span>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <span id="who" class="pill" hidden></span>
+        <button id="btn-theme" class="icon-btn" type="button" aria-label="Switch theme" title="Theme"><span data-icon="theme"></span></button>
+        <button id="btn-signout" class="ghost small" type="button" hidden>Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap admin-wrap viz">
+    <section id="gate" class="gate" hidden aria-labelledby="gate-title">
+      <div class="card gate-card">
+        <h1 id="gate-title">Admin console</h1>
+        <p class="muted" id="gate-text">Sign in to see the audit log and its reports.</p>
+        <form id="key-form" class="key-form" hidden>
+          <label class="field"><span>Admin key</span>
+            <input class="input" id="key" type="password" autocomplete="current-password" required minlength="1" spellcheck="false"></label>
+          <button class="primary" type="submit">Sign in</button>
+        </form>
+        <div id="gate-help" class="gate-help"></div>
+      </div>
+    </section>
+
+    <section id="console" hidden>
+      <!-- One filter row above everything it scopes: every chart, tile and table re-renders against the same range. -->
+      <div class="filter-row" role="group" aria-label="Date range">
+        <div class="seg" id="range-seg">
+          <button type="button" data-range="1" aria-pressed="false">Today</button>
+          <button type="button" data-range="7" aria-pressed="false">7 days</button>
+          <button type="button" data-range="30" aria-pressed="true">30 days</button>
+          <button type="button" data-range="90" aria-pressed="false">90 days</button>
+          <button type="button" data-range="365" aria-pressed="false">12 months</button>
+          <button type="button" data-range="custom" aria-pressed="false">Custom</button>
+        </div>
+        <div class="custom-range" id="custom-range" hidden>
+          <label><span class="sr">From</span><input class="input" type="date" id="from"></label>
+          <span aria-hidden="true">–</span>
+          <label><span class="sr">To</span><input class="input" type="date" id="to"></label>
+        </div>
+        <span class="grow"></span>
+        <span class="updated muted small" id="updated"></span>
+        <label class="auto-toggle small"><input type="checkbox" id="auto" checked> Refresh every minute</label>
+        <button id="btn-refresh" class="ghost small" type="button"><span data-icon="retry"></span>Refresh</button>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Reports">
+        <button role="tab" id="tab-overview" aria-controls="p-overview" aria-selected="true" data-tab="overview">Overview</button>
+        <button role="tab" id="tab-content" aria-controls="p-content" aria-selected="false" data-tab="content">Content</button>
+        <button role="tab" id="tab-audience" aria-controls="p-audience" aria-selected="false" data-tab="audience">Audience</button>
+        <button role="tab" id="tab-downloads" aria-controls="p-downloads" aria-selected="false" data-tab="downloads">Downloads log</button>
+        <button role="tab" id="tab-requests" aria-controls="p-requests" aria-selected="false" data-tab="requests">Requests log</button>
+        <button role="tab" id="tab-releases" aria-controls="p-releases" aria-selected="false" data-tab="releases">Releases</button>
+        <button role="tab" id="tab-system" aria-controls="p-system" aria-selected="false" data-tab="system">System</button>
+      </nav>
+
+      <div id="notice" class="banner warn" role="status" hidden></div>
+
+      <!-- Overview -->
+      <section id="p-overview" role="tabpanel" aria-labelledby="tab-overview" class="panel">
+        <div class="kpis" id="kpis"></div>
+        <div class="cards">
+          <article class="card chart-card wide" data-chart="outcomes"><header><h2>Downloads by outcome</h2><p class="sub" data-sub></p></header></article>
+          <article class="card chart-card" data-chart="visitors"><header><h2>Visitors</h2><p class="sub">Distinct IP addresses</p></header></article>
+          <article class="card chart-card" data-chart="volume"><header><h2>Data prepared</h2><p class="sub">Size of the files produced</p></header></article>
+          <article class="card chart-card" data-chart="genres"><header><h2>Genres</h2><p class="sub">Downloads per YouTube category</p></header></article>
+          <article class="card chart-card" data-chart="countries"><header><h2>Where downloads come from</h2><p class="sub">Downloads per country</p></header></article>
+          <article class="card chart-card" data-chart="devices"><header><h2>Devices</h2><p class="sub">Visitors per device type</p></header></article>
+          <article class="card chart-card" data-chart="heatmap"><header><h2>When people download</h2><p class="sub" data-sub></p></header></article>
+        </div>
+      </section>
+
+      <!-- Content -->
+      <section id="p-content" role="tabpanel" aria-labelledby="tab-content" class="panel" hidden>
+        <div class="cards">
+          <article class="card chart-card" data-chart="genresAll"><header><h2>Genres</h2><p class="sub">Downloads per YouTube category (playlist downloads count their most common one)</p></header></article>
+          <article class="card chart-card" data-chart="formats"><header><h2>Formats</h2><p class="sub">Downloads per container and quality</p></header></article>
+          <article class="card chart-card" data-chart="modes"><header><h2>What people take</h2><p class="sub">Share of downloads by mode</p></header></article>
+          <article class="card chart-card" data-chart="scopes"><header><h2>How much of it</h2><p class="sub">Whole video, a clip, chapters or a playlist</p></header></article>
+          <article class="card chart-card" data-chart="qualities"><header><h2>Video quality asked for</h2><p class="sub">Video downloads per resolution cap</p></header></article>
+          <article class="card chart-card" data-chart="channels"><header><h2>Top channels</h2><p class="sub">Downloads per channel</p></header></article>
+          <article class="card chart-card wide" data-chart="videos"><header><h2>Top videos</h2><p class="sub">Most downloaded in this period</p></header></article>
+          <article class="card chart-card" data-chart="errors"><header><h2><span aria-hidden="true">✕</span> Why downloads failed</h2><p class="sub">Failed downloads per reason</p></header></article>
+          <article class="card chart-card" data-chart="statuses"><header><h2>Outcomes</h2><p class="sub">Share of downloads by final state</p></header></article>
+        </div>
+      </section>
+
+      <!-- Audience -->
+      <section id="p-audience" role="tabpanel" aria-labelledby="tab-audience" class="panel" hidden>
+        <div class="kpis" id="audience-kpis"></div>
+        <div class="cards">
+          <article class="card chart-card" data-chart="visitorCountries"><header><h2>Visitors by country</h2><p class="sub">Distinct IPs (bots left out)</p></header></article>
+          <article class="card chart-card" data-chart="cities"><header><h2>Cities</h2><p class="sub">Downloads per city</p></header></article>
+          <article class="card chart-card" data-chart="languages"><header><h2>Languages</h2><p class="sub">Visitors per browser language</p></header></article>
+          <article class="card chart-card" data-chart="timezones"><header><h2>Time zones</h2><p class="sub">Visitors per time zone the page reported</p></header></article>
+          <article class="card chart-card" data-chart="browsers"><header><h2>Browsers</h2><p class="sub">Visitors per browser</p></header></article>
+          <article class="card chart-card" data-chart="os"><header><h2>Operating systems</h2><p class="sub">Visitors per OS</p></header></article>
+          <article class="card chart-card" data-chart="devices2"><header><h2>Devices</h2><p class="sub">Visitors per device type</p></header></article>
+          <article class="card chart-card" data-chart="referrers"><header><h2>Referrers</h2><p class="sub">Visitors arriving from another page</p></header></article>
+          <article class="card chart-card" data-chart="users"><header><h2>Signed-in users</h2><p class="sub">Downloads per user (Ark sign-in)</p></header></article>
+          <article class="card chart-card wide" data-chart="visitHeat"><header><h2>When people visit</h2><p class="sub">Page views by weekday and hour</p></header></article>
+        </div>
+      </section>
+
+      <!-- Downloads log -->
+      <section id="p-downloads" role="tabpanel" aria-labelledby="tab-downloads" class="panel" hidden>
+        <form class="log-filters" id="dl-filters">
+          <input class="input grow" type="search" name="q" placeholder="Search title, channel, video id, IP, user, error…" aria-label="Search downloads">
+          <select name="status" aria-label="Status"><option value="">Any outcome</option><option>completed</option><option>failed</option><option>canceled</option><option>running</option><option>queued</option></select>
+          <select name="mode" aria-label="Mode"><option value="">Any mode</option><option>video</option><option>audio</option><option>subtitles</option><option>thumbnail</option></select>
+          <button class="ghost small" type="submit">Search</button>
+          <button class="ghost small" type="button" data-export="downloads.csv"><span data-icon="download"></span>CSV</button>
+        </form>
+        <div class="card log-card"><div id="dl-table"></div><div class="pager" id="dl-pager"></div></div>
+      </section>
+
+      <!-- Requests log -->
+      <section id="p-requests" role="tabpanel" aria-labelledby="tab-requests" class="panel" hidden>
+        <div class="cards">
+          <article class="card chart-card" data-chart="requestKinds"><header><h2>Requests by kind</h2><p class="sub">Count; the table also has the average time</p></header></article>
+          <article class="card chart-card" data-chart="statusCodes"><header><h2>Status codes</h2><p class="sub">Requests per HTTP status</p></header></article>
+        </div>
+        <form class="log-filters" id="rq-filters">
+          <input class="input grow" type="search" name="q" placeholder="Search path, IP, user agent, detail…" aria-label="Search requests">
+          <select name="kind" aria-label="Kind"><option value="">Any kind</option><option>page</option><option>probe</option><option>job</option><option>job-status</option><option>events</option><option>file</option><option>zip</option><option>system</option><option>release</option><option>admin</option><option>admin-page</option><option>auth</option><option>shortcut</option><option>api</option><option>other</option></select>
+          <select name="status" aria-label="Status class"><option value="">Any status</option><option>2xx</option><option>3xx</option><option>4xx</option><option>5xx</option></select>
+          <button class="ghost small" type="submit">Search</button>
+          <button class="ghost small" type="button" data-export="requests.csv"><span data-icon="download"></span>CSV</button>
+        </form>
+        <div class="card log-card"><div id="rq-table"></div><div class="pager" id="rq-pager"></div></div>
+      </section>
+
+      <!-- Releases -->
+      <section id="p-releases" role="tabpanel" aria-labelledby="tab-releases" class="panel" hidden>
+        <div id="releases"></div>
+      </section>
+
+      <!-- System -->
+      <section id="p-system" role="tabpanel" aria-labelledby="tab-system" class="panel" hidden>
+        <div id="system"></div>
+      </section>
+    </section>
+  </main>
+
+  <aside id="drawer" class="drawer" hidden aria-labelledby="drawer-title">
+    <div class="drawer-head"><h2 id="drawer-title">Download</h2><button class="icon-btn" type="button" id="drawer-close" aria-label="Close"><span data-icon="x"></span></button></div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p class="muted small">IP geolocation by <a href="https://db-ip.com" rel="noopener" target="_blank">DB-IP</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener" target="_blank">CC BY 4.0</a>. Times are shown in your browser's time zone; days are counted in the server's audit time zone (<span id="audit-tz">UTC</span>).</p>
+    </div>
+  </footer>
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+</body>
+</html>

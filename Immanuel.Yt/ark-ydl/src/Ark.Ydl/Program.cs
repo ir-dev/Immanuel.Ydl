@@ -1,8 +1,12 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Ark.oAuth;
+using Ark.Ydl.Admin;
+using Ark.Ydl.Audit;
 using Ark.Ydl.Endpoints;
+using Ark.Ydl.Releases;
 using Ark.Ydl.Jobs;
 using Ark.Ydl.Options;
 using Ark.Ydl.Tools;
@@ -21,12 +25,19 @@ builder.Services.PostConfigure<YdlOptions>(o =>
 });
 builder.Services.AddSingleton(sp =>
     new YdlPaths(sp.GetRequiredService<IOptions<YdlOptions>>().Value, builder.Environment.ContentRootPath));
+var userAgent = "ark-ydl/" + (typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1");
 builder.Services.AddHttpClient("tools", c =>
 {
     c.Timeout = TimeSpan.FromMinutes(5);
-    c.DefaultRequestHeaders.UserAgent.ParseAdd("ark-ydl/1.0");
+    c.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
+});
+builder.Services.AddHttpClient("geoip", c =>
+{
+    c.Timeout = Timeout.InfiniteTimeSpan; // a 60 MB file on a slow host; GeoIpService bounds it itself
+    c.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
 });
 builder.Services.AddMemoryCache();
+builder.Services.AddDataProtection();
 builder.Services.AddSingleton<ToolLocator>();
 builder.Services.AddSingleton<ProbeService>();
 builder.Services.AddSingleton<JobManager>();
@@ -34,6 +45,21 @@ builder.Services.AddSingleton<JobRunner>();
 builder.Services.AddHostedService<ToolMaintenanceService>();
 builder.Services.AddHostedService<JobWorker>();
 builder.Services.AddHostedService<JobJanitor>();
+
+// ── release info, audit log, admin console ──────────────────────────────────
+builder.Services.AddSingleton<ReleaseCatalog>();
+builder.Services.AddSingleton<LatestReleaseService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<LatestReleaseService>());
+builder.Services.AddArkRapidDatabase(builder.Configuration);   // "ArkDatabase:Databases"; "audit" defaults to {DataRoot}/audit/ark-ydl-audit.db
+builder.Services.AddSingleton<AuditWriter>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditWriter>());
+builder.Services.AddSingleton<GeoIpService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GeoIpService>());
+builder.Services.AddSingleton<AuditRecorder>();
+builder.Services.AddSingleton<AuditReports>();
+builder.Services.AddSingleton<AuditMaintenance>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AuditMaintenance>());
+builder.Services.AddSingleton<AdminAccess>();
 
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
@@ -57,6 +83,9 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(1, limits.ProbesPerMinute), Window = TimeSpan.FromMinutes(1) }));
     o.AddPolicy("jobs", http => RateLimitPartition.GetFixedWindowLimiter(ApiEndpoints.ClientKey(http),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(1, limits.JobsPerMinute), Window = TimeSpan.FromMinutes(1) }));
+    // Admin key guesses: per IP, whoever is signed in.
+    o.AddPolicy("admin-login", http => RateLimitPartition.GetFixedWindowLimiter("ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(5) }));
 });
 
 // ── optional sign-in against the Ark identity server ────────────────────────
@@ -75,6 +104,22 @@ if (authEnabled)
 }
 
 var app = builder.Build();
+
+// ── audit: every request, outermost, so the row has the final status (500s from the handler below included) ──
+var audit = app.Services.GetRequiredService<AuditRecorder>();
+audit.Attach(app.Services.GetRequiredService<JobManager>());
+app.Use(async (ctx, next) =>
+{
+    var started = Stopwatch.GetTimestamp();
+    try
+    {
+        await next();
+    }
+    finally
+    {
+        audit.Request(ctx, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+});
 
 app.UseExceptionHandler();
 
@@ -139,6 +184,8 @@ app.MapGet("/healthz", (ToolLocator tools) => Results.Ok(new
 })).AllowAnonymous();
 
 app.MapYdlApi(authEnabled);
+app.MapReleaseApi();
+app.MapAdminApi(authEnabled);
 app.MapYouTubeShortcuts();
 
 app.Run();

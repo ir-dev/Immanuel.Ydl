@@ -1,8 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text.Json;
+using Ark.Ydl.Audit;
 using Ark.Ydl.Jobs;
 using Ark.Ydl.Options;
+using Ark.Ydl.Releases;
 using Ark.Ydl.Tools;
 using Ark.Ydl.Util;
 using Ark.Ydl.YtDlp;
@@ -19,14 +21,16 @@ public static class ApiEndpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapGet("/system", (ToolLocator tools, IOptions<YdlOptions> opt, HttpContext ctx) =>
+        api.MapGet("/system", (ToolLocator tools, IOptions<YdlOptions> opt, ReleaseCatalog catalog, LatestReleaseService latest, HttpContext ctx) =>
         {
             var s = tools.Status;
             var o = opt.Value;
             return Results.Ok(new
             {
                 app = "ark-ydl",
-                version = typeof(ApiEndpoints).Assembly.GetName().Version?.ToString(3),
+                version = catalog.AppVersion,
+                release = ReleaseEndpoints.VersionInfo(catalog, latest),
+                audit = new { enabled = o.Audit.Enabled, requests = o.Audit.Enabled && o.Audit.LogRequests, ipMode = o.Audit.IpMode.ToString().ToLowerInvariant() },
                 ready = s.Ready,
                 preparing = s.Preparing,
                 tools = new
@@ -56,29 +60,51 @@ public static class ApiEndpoints
             });
         });
 
-        api.MapPost("/probe", async (ProbeInput input, ProbeService probe, IOptions<YdlOptions> opt, CancellationToken ct) =>
+        api.MapPost("/probe", async (ProbeInput input, ProbeService probe, IOptions<YdlOptions> opt, HttpContext ctx, CancellationToken ct) =>
         {
             var o = opt.Value;
             var url = UrlGuard.Analyze(input.Url, o.AllowedSites, o.AllowAnySite, input.Playlist);
-            if (!url.Ok) return Results.BadRequest(new { error = url.Error });
+            if (!url.Ok)
+            {
+                AuditRecorder.Annotate(ctx, detail: url.Error);
+                return Results.BadRequest(new { error = url.Error });
+            }
             var playlist = url.Kind is UrlKind.Playlist or UrlKind.Channel || (url.Kind == UrlKind.Other && input.Playlist == true);
             var outcome = await probe.ProbeAsync(url, playlist, ct);
-            return outcome.Result is { } r
-                ? Results.Ok(r)
-                : Results.Json(new { error = outcome.Error, detail = outcome.Detail }, statusCode: outcome.Status);
+            if (outcome.Result is { } r)
+            {
+                var genre = r.Categories.FirstOrDefault() ?? r.Genre;
+                AuditRecorder.Annotate(ctx, videoId: r.Kind == "video" ? r.Id : url.VideoId,
+                    detail: $"{(r.Kind == "playlist" ? "playlist: " : "")}{r.Title}{(genre is null ? "" : $" [{genre}]")}");
+                return Results.Ok(r);
+            }
+            AuditRecorder.Annotate(ctx, videoId: url.VideoId, detail: outcome.Error);
+            return Results.Json(new { error = outcome.Error, detail = outcome.Detail }, statusCode: outcome.Status);
         }).RequireRateLimiting("probe");
 
-        api.MapPost("/jobs", (DownloadRequest req, JobManager jobs, IOptions<YdlOptions> opt, HttpContext ctx) =>
+        api.MapPost("/jobs", (DownloadRequest req, JobManager jobs, ProbeService probes, AuditRecorder audit, IOptions<YdlOptions> opt, HttpContext ctx) =>
         {
             var o = opt.Value;
             var error = DownloadRequestValidator.Validate(req, o);
-            if (error is not null) return Results.BadRequest(new { error });
+            if (error is not null)
+            {
+                AuditRecorder.Annotate(ctx, detail: error);
+                return Results.BadRequest(new { error });
+            }
             var url = UrlGuard.Analyze(req.Url, o.AllowedSites, o.AllowAnySite, req.Playlist);
-            if (!url.Ok) return Results.BadRequest(new { error = url.Error });
+            if (!url.Ok)
+            {
+                AuditRecorder.Annotate(ctx, detail: url.Error);
+                return Results.BadRequest(new { error = url.Error });
+            }
             if (req.Playlist && url.Kind == UrlKind.Video) req.Playlist = false;
             if (req.Thumbnail is { } t && !t.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) req.Thumbnail = null;
 
-            var (job, err) = jobs.Enqueue(req, url, ClientKey(ctx));
+            // The page probed this link a moment ago: that cached result is where title, channel and genre come from.
+            var probed = probes.Cached(url, YtDlpArgs.IsPlaylist(req, url)) ?? probes.Cached(url, !YtDlpArgs.IsPlaylist(req, url));
+            var client = audit.Client(ctx);
+            var (job, err) = jobs.Enqueue(req, url, ClientKey(ctx), created: j => audit.DownloadQueued(j, client, probed));
+            AuditRecorder.Annotate(ctx, videoId: url.VideoId, jobId: job?.Id, detail: err ?? req.Label);
             return job is null
                 ? Results.Json(new { error = err }, statusCode: StatusCodes.Status429TooManyRequests)
                 : Results.Accepted($"/api/jobs/{job.Id}", jobs.Snapshot(job));
@@ -110,7 +136,7 @@ public static class ApiEndpoints
             return Results.NoContent();
         });
 
-        api.MapGet("/jobs/{id}/files/{index:int}", (string id, int index, string? inline, JobManager jobs, HttpContext ctx) =>
+        api.MapGet("/jobs/{id}/files/{index:int}", (string id, int index, string? inline, JobManager jobs, AuditRecorder audit, HttpContext ctx) =>
         {
             if (jobs.Get(id) is not { Status: JobStatus.Completed } job) return Gone();
             var file = job.Files.FirstOrDefault(f => f.Index == index);
@@ -118,18 +144,24 @@ public static class ApiEndpoints
             var path = Path.Combine(job.Directory, file.RelativePath);
             if (!File.Exists(path)) return Gone();
             var type = JobFiles.ContentType(file.Name);
-            if (inline is not ("1" or "true")) return Results.File(path, type, file.Name, enableRangeProcessing: true);
+            AuditRecorder.Annotate(ctx, videoId: job.Url.VideoId, jobId: job.Id, detail: file.Name);
+            if (inline is not ("1" or "true"))
+            {
+                if (IsWholeFileRequest(ctx)) audit.Served(job, file.Size); // a save, not a resumed chunk
+                return Results.File(path, type, file.Name, enableRangeProcessing: true);
+            }
             ctx.Response.Headers.ContentDisposition = new ContentDispositionHeaderValue("inline") { FileNameStar = file.Name }.ToString();
             return Results.File(path, type, enableRangeProcessing: true);
         });
 
-        api.MapGet("/jobs/{id}/zip", async (string id, JobManager jobs, CancellationToken ct) =>
+        api.MapGet("/jobs/{id}/zip", async (string id, JobManager jobs, AuditRecorder audit, HttpContext ctx, CancellationToken ct) =>
         {
             if (jobs.Get(id) is not { } job) return Gone();
             var zip = await jobs.EnsureZipAsync(job, ct);
-            return zip is { } z
-                ? Results.File(z.Path, "application/zip", z.Name, enableRangeProcessing: true)
-                : Results.NotFound(new { error = "Nothing to zip yet." });
+            if (zip is not { } z) return Results.NotFound(new { error = "Nothing to zip yet." });
+            AuditRecorder.Annotate(ctx, videoId: job.Url.VideoId, jobId: job.Id, detail: z.Name);
+            if (IsWholeFileRequest(ctx)) audit.Served(job, new FileInfo(z.Path).Length);
+            return Results.File(z.Path, "application/zip", z.Name, enableRangeProcessing: true);
         });
     }
 
@@ -139,6 +171,13 @@ public static class ApiEndpoints
         if (ctx.User.Identity?.IsAuthenticated == true)
             return "u:" + (ctx.User.FindFirst("sub")?.Value ?? ctx.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? ctx.User.Identity.Name);
         return "ip:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    }
+
+    /// <summary>No Range header, or one starting at byte 0: the start of a save, as opposed to a resumed or seeking request.</summary>
+    internal static bool IsWholeFileRequest(HttpContext ctx)
+    {
+        var range = ctx.Request.Headers.Range.ToString();
+        return range.Length == 0 || range.Replace(" ", "").StartsWith("bytes=0-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IResult Gone() =>

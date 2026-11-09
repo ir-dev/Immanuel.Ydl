@@ -65,6 +65,7 @@
       </form>
 
       <div id="sys-banner" class="banner warn" role="status" hidden></div>
+      <div id="ver-banner" class="banner info" role="status" hidden></div>
 
       <ul class="hint-chips" aria-label="What you can download">
         <li><span data-icon="film"></span>Up to 8K video</li>
@@ -120,9 +121,18 @@
     <div class="wrap">
       <svg class="footer-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
       <p>Download only content you own or have permission to save, and respect creators and YouTube's Terms of Service.</p>
-      <p class="muted">ARK-RAPID <span id="app-version"></span> · powered by <a href="https://github.com/yt-dlp/yt-dlp" rel="noopener" target="_blank">yt-dlp</a> and <a href="https://ffmpeg.org" rel="noopener" target="_blank">ffmpeg</a></p>
+      <p class="muted footer-line">ARK-RAPID <button id="btn-version" class="ver-chip" type="button" hidden></button> · powered by <a href="https://github.com/yt-dlp/yt-dlp" rel="noopener" target="_blank">yt-dlp</a> and <a href="https://ffmpeg.org" rel="noopener" target="_blank">ffmpeg</a></p>
+      <p id="audit-note" class="faint small" hidden></p>
     </div>
   </footer>
+
+  <dialog id="release-dlg" class="dlg" aria-labelledby="release-title">
+    <form method="dialog" class="dlg-head">
+      <h2 id="release-title">About this release</h2>
+      <button class="icon-btn" value="close" aria-label="Close" title="Close"><span data-icon="x"></span></button>
+    </form>
+    <div id="release-body" class="dlg-body"></div>
+  </dialog>
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 </body>

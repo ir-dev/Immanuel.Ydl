@@ -10,7 +10,7 @@ namespace Ark.Ydl.Tests;
 /// Boots the real app in-process. Tool auto-download/update is switched off, so nothing is
 /// fetched or executed beyond what is already installed on the machine.
 /// </summary>
-public sealed class AppFactory : WebApplicationFactory<Program>
+public class AppFactory : WebApplicationFactory<Program>
 {
     public string DataRoot { get; } = Directory.CreateTempSubdirectory("ark-ydl-tests-").FullName;
 
@@ -22,7 +22,13 @@ public sealed class AppFactory : WebApplicationFactory<Program>
         builder.UseSetting("Ydl:Tools:AutoUpdateYtDlp", "false");
         builder.UseSetting("Ydl:Tools:AutoDownloadFfmpeg", "false");
         builder.UseSetting("Ydl:Tools:YtDlpPath", Path.Combine(DataRoot, "no-such-yt-dlp"));
+        builder.UseSetting("Ydl:Audit:GeoIp:AutoDownload", "false");
+        builder.UseSetting("Ydl:Release:FeedUrl", "");
+        foreach (var (k, v) in Settings) builder.UseSetting(k, v);
     }
+
+    /// <summary>Extra settings for a derived factory (e.g. an admin key).</summary>
+    protected virtual IEnumerable<(string Key, string Value)> Settings => [];
 
     protected override void Dispose(bool disposing)
     {

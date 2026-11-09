@@ -18,10 +18,16 @@ public sealed class ProbeService(ToolLocator tools, IOptions<YdlOptions> opt, Yd
 {
     private readonly SemaphoreSlim _slots = new(Math.Max(1, opt.Value.MaxConcurrentProbes));
 
+    public static string CacheKey(UrlAnalysis url, bool playlist) => $"probe:{(playlist ? "pl" : "v")}:{url.Url}";
+
+    /// <summary>What a recent probe of this link found, without running yt-dlp (the audit log's metadata source).</summary>
+    public ProbeResult? Cached(UrlAnalysis url, bool playlist) =>
+        cache.TryGetValue(CacheKey(url, playlist), out ProbeResult? r) ? r : null;
+
     public async Task<ProbeOutcome> ProbeAsync(UrlAnalysis url, bool playlist, CancellationToken ct)
     {
         var o = opt.Value;
-        var key = $"probe:{(playlist ? "pl" : "v")}:{url.Url}";
+        var key = CacheKey(url, playlist);
         if (cache.TryGetValue(key, out ProbeResult? cached) && cached is not null)
             return ProbeOutcome.Success(cached.WithHints(url.Start, url.End, url.ListId));
 

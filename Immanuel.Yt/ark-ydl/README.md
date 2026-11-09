@@ -61,8 +61,12 @@ SHA-256 of each file:
 
 ```bash
 dotnet run --project src/Ark.Ydl          # http://localhost:5080
-dotnet test                               # 198 tests
+dotnet test                               # 279 tests
+ARK_YDL_GEOIP_LIVE=1 dotnet test --filter GeoIpLiveTests   # also downloads the real DB-IP file (4 MB) and looks IPs up
 ```
+
+Locally (the Development environment, a request from this machine) the admin console at
+`http://localhost:5080/admin` opens without a key, with a banner saying so.
 
 In VS Code, **F5** (`ark-ydl (http)`, or `ark-ydl (https)` after `dotnet dev-certs https --trust`)
 builds, starts the app under the debugger with the `Properties/launchSettings.json` profile and opens
@@ -108,6 +112,10 @@ that is done. What the host has to allow:
 * **Outbound HTTPS** to `api.github.com` and `release-assets.githubusercontent.com` (yt-dlp,
   ffmpeg), `www.gyan.dev` (ffmpeg fallback) and `dl.deno.land` (deno). A failed download is retried in
   the background (10 min, then doubling, up to every 6 h), so a blip at start-up fixes itself.
+  Optional: `download.db-ip.com` (GeoIP for the audit log, monthly) and `raw.githubusercontent.com`
+  (the latest-release check). Neither failing affects downloads.
+* **SQLite's native library** (`e_sqlite3`, part of the publish output) for the audit log. A win-x64
+  publish needs a 64-bit app pool. If it can't load, downloads still work and `/admin` says why.
 
 If the host blocks those downloads, upload the files yourself over FTP or the file manager. The app
 picks them up on its next start, and ffmpeg and deno also at the next background retry:
@@ -155,6 +163,94 @@ in the top bar) shows what was found, and when something is missing its `note` s
 | `Tools:FfmpegReleaseBase` / `FfmpegWindowsReleaseBase` | martin-riedl.de / yt-dlp FFmpeg-Builds | Download sources (for a mirror). Empty `FfmpegWindowsReleaseBase` skips it. |
 | `Tools:FfmpegWindowsFallbackUrl` | gyan.dev release essentials | Windows x64 fallback zip (`.sha256` beside it). Empty = none. |
 | `Tools:AutoUpdateYtDlp` / `UpdateIntervalHours` | true / 24 | Self-update a yt-dlp this app owns. |
+| `Audit:Enabled` | true | Keep the audit log (below). Off = nothing is written. |
+| `Audit:LogRequests` / `IncludeStaticFiles` | true / false | Log every request, or downloads only; static files (scripts, icons) are left out unless asked for. |
+| `Audit:ExcludePaths` | `["/healthz"]` | Path prefixes never logged. |
+| `Audit:RetentionDays` | 365 | Raw rows older than this are deleted; the per-day totals stay. 0 = keep everything. |
+| `Audit:IpMode` | `Full` | `Full`, `Masked` (last IPv4 octet / last 80 IPv6 bits zeroed) or `Hashed` (salted SHA-256). |
+| `Audit:TimeZone` | `UTC` | IANA or Windows id deciding which day and hour a row counts towards. |
+| `Audit:CaptureItemMetadata` | true | yt-dlp writes each item's genre, channel and duration to the job folder (`--print-to-file`). |
+| `Audit:CountryHeader` | – | A header a trusted CDN sets with the country code (e.g. `CF-IPCountry`); used before GeoIP. |
+| `Audit:GeoIp:Enabled` / `Edition` / `AutoDownload` | true / `city` / true | DB-IP lite into `{DataRoot}/geoip`, refreshed monthly. `country` is 4 MB instead of 60 MB. |
+| `Audit:GeoIp:DatabasePath` | – | Your own `.mmdb` (DB-IP or MaxMind GeoLite2 layout); nothing is downloaded. |
+| `Admin:Key` | – | Admin console key, 16+ characters. Unset = key sign-in off. |
+| `Admin:Roles` | `["ark-ydl.admin"]` | With Ark sign-in on, these Ark claims open the console without the key. |
+| `Admin:SessionHours` | 12 | How long a key sign-in lasts. |
+| `Release:FeedUrl` | this repo's `releases.json` on master | Where "latest release" comes from. Empty = only the notes built into the app. |
+| `Release:CheckIntervalHours` | 12 | How often the feed is read. |
+
+`ArkDatabase:Databases:audit` (outside the `Ydl` section) picks the audit store: `Provider` `Sqlite`
+(the tested one; `Maria`/`Postgres` exist in the library) and an optional `ConnectionString`, default
+`Data Source={DataRoot}/audit/ark-ydl-audit.db`.
+
+## Releases and versions
+
+`src/Ark.Ydl/releases.json` is the release manifest: every version with its date, what changed, how
+compatible it is with the one before (API, configuration, data, deployment, browsers; each
+`compatible`, `config` or `breaking`) and the steps to upgrade to it. It also lists the two apps
+this one replaced. It is embedded in the assembly, so a deployed build always carries its own notes.
+
+The page shows a version chip in the footer: a green dot when up to date, gold with "v1.2.0
+available" when the release feed has a newer one, and a reload prompt when the browser runs an
+older copy of the page than the server (an installed app's cache). Clicking it opens *About this
+release*. It shows the running version (and git revision), the version in `manifest.webmanifest`,
+the latest release and where that came from, what changed, and a migration plan from any earlier
+version. The plan chains every step in between, grouped for whoever runs the server and for users.
+The chip needs only the small `release` block of `/api/system`. The notes are fetched when the
+dialog opens, and the feed is read in the background, never during a request.
+
+To cut a release, change the version in five places and add a `releases.json` entry:
+`<Version>` in `Ark.Ydl.csproj`, `"current"` in `releases.json`, `"version"` in
+`wwwroot/manifest.webmanifest`, `CLIENT_VERSION` in `wwwroot/js/version.js` and the cache name in
+`wwwroot/sw.js`. `ReleaseTests` fails if any of them disagree, or if an entry is malformed.
+
+## Audit log
+
+Every request and every download is written to a local SQLite file,
+`{DataRoot}/audit/ark-ydl-audit.db`, through [Ark.Rapid.Database](https://www.nuget.org/packages/Ark.Rapid.Database):
+
+* **`audit_request`**, one row per request: time, method, path, kind (page, probe, job, file, admin…),
+  status, duration, bytes, the video or job it was about, and who asked.
+* **`audit_download`**, one row per download, updated as it runs: the link, video id, title, channel,
+  **YouTube category (genre)**, tags, duration, views, upload date; what was asked for (mode,
+  format, quality, codec, clip ranges, playlist items, subtitles, SponsorBlock); the outcome (status,
+  error, queue and run time, files and **total size**, how often it was saved); and who asked.
+* **Who** means: IP address (per `IpMode`), country, region and city (GeoIP), signed-in user, browser,
+  OS, device type, bots, language, referrer, and what the page reports about itself: time zone,
+  screen size and whether it runs as the installed app.
+* **`audit_daily`**, one row per day with the totals, recomputed every 10 minutes for today and
+  yesterday. It is kept when raw rows pass `RetentionDays`.
+
+Writing never slows a request. Rows go into a bounded in-memory queue, and one background writer
+saves them in batches, one transaction each. If the database can't be opened, downloads carry on and
+the admin console says why. Values reach SQL only through the library's own literal encoding, and
+identifiers only from code. The page tells users that requests are logged.
+
+GeoIP data is [DB-IP](https://db-ip.com) IP-to-City Lite, licensed under CC BY 4.0. The attribution is
+shown in the admin console.
+
+## Admin console
+
+`/admin` holds predefined reports over the audit log, for a date range chosen once above them all
+(today, 7/30/90 days, 12 months or custom). Every chart has a table view and every number a tooltip:
+
+* **Overview**: downloads, success rate, data prepared, saves, visitors, videos, media hours and
+  average file, each compared with the previous period. Also downloads per day by outcome, visitors,
+  data per day, genres, countries, devices, and an hour × weekday heat map. A range of a day or two
+  is drawn per hour.
+* **Content**: genres, formats, mode and scope splits, quality caps, top channels, top videos, why
+  downloads failed, outcomes.
+* **Audience**: countries, cities, languages, time zones, browsers, OS, devices, referrers, signed-in
+  users, installed-app share, bots, and when people visit.
+* **Downloads log / Requests log**: search and filters, paging, every field of a row in a side panel,
+  CSV export of the range.
+* **Releases**: versions, notes, migration planner, compatibility matrix, "check now".
+* **System**: audit store health (file, size, rows, queue, errors, retention), GeoIP state, tools.
+
+Who gets in: whoever enters `Ydl:Admin:Key`. The key is compared in constant time and rate-limited,
+and a correct key earns an HttpOnly, SameSite=Strict cookie that changing the key revokes. With Ark
+sign-in on, a user holding the Ark claim `ark-ydl.admin` also gets in. Without either, the console is
+locked, except for a Development run on localhost.
 
 ## Bot checks ("Sign in to confirm you're not a bot")
 
@@ -195,6 +291,9 @@ looks like a wrong password. Per-client job limits then apply per user instead o
 | `GET /api/jobs/{id}/files/{n}[?inline=1]` | A file (range requests supported). |
 | `GET /api/jobs/{id}/zip` | Every file of the job as one ZIP (built once, stored uncompressed). |
 | `GET /healthz` | Liveness and tool versions. |
+| `GET /api/version` | This app's version and revision, the web manifest's version, the latest release, `updateAvailable`. |
+| `GET /api/releases` · `GET /api/releases/migration?from=1.0.0` | Release notes and compatibility matrix · the upgrade plan from a version (or `legacy-2017` / `legacy-2020`). |
+| `GET /admin` · `/api/admin/*` | Admin console and its API (session, overview, breakdowns, downloads, requests, export, status). Key or Ark claim. |
 | `GET /watch?…`, `/shorts/{id}`, `/playlist?…`, `/{11-char id}`, `/@handle` | "Swap the domain" redirects into the app. |
 
 ## How it is built
@@ -209,7 +308,12 @@ src/Ark.Ydl/
                           ProbeService + ProbeMapper (-J → UI model), YtDlpErrors (friendly messages)
   Jobs/                   DownloadJob (versioned state), JobManager (queue, zip), JobRunner, workers, janitor
   Endpoints/              API + shortcut routes
-  wwwroot/                index.html, css/app.css, js/{app,clip,jobs,api,util}.js — no build step
+  Releases/               ReleaseCatalog (manifest, versions, migration plans), LatestReleaseService (feed), endpoints
+  releases.json           the release manifest (embedded)
+  Audit/                  schema (Ark.Rapid.Database), recorder, batched writer, GeoIP, reports, daily rollup + retention
+  Admin/                  admin access (key / Ark claim) and the admin API
+  wwwroot/                index.html, admin.html, css/{app,admin}.css,
+                          js/{app,clip,jobs,api,util,release,version,admin,charts}.js — no build step
   wwwroot/img/            logo + icons, generated by branding/build.py (don't edit by hand)
 tests/Ark.Ydl.Tests/      unit tests for every pure piece + in-process API tests (WebApplicationFactory)
 branding/                 logo sources, the vector master and the icon generator (not shipped)

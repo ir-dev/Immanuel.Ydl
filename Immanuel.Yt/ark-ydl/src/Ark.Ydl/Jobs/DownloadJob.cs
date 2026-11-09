@@ -79,16 +79,25 @@ public sealed class DownloadJob(string id, long sequence, DownloadRequest reques
     public DateTimeOffset? StartedAt { get; internal set; }
     public DateTimeOffset? FinishedAt { get; internal set; }
     public DateTimeOffset? ExpiresAt { get; internal set; }
+    /// <summary>Per-item metadata yt-dlp wrote during the run (genre, channel…), for the audit log.</summary>
+    public IReadOnlyList<ItemMeta> Items { get; internal set; } = [];
+
+    /// <summary>Called (outside the lock) after every change of <see cref="Status"/>. Set by the job manager.</summary>
+    internal Action<DownloadJob>? StatusChanged { get; set; }
 
     public bool IsTerminal => Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Canceled;
 
     public void Mutate(Action<DownloadJob> change)
     {
+        JobStatus before, after;
         lock (_gate)
         {
+            before = Status;
             change(this);
+            after = Status;
             Signal();
         }
+        if (before != after) StatusChanged?.Invoke(this);
     }
 
     /// <summary>Wake SSE listeners without changing state (e.g. the queue moved).</summary>
@@ -107,8 +116,9 @@ public sealed class DownloadJob(string id, long sequence, DownloadRequest reques
             Stage = "Starting";
             StartedAt = DateTimeOffset.UtcNow;
             Signal();
-            return true;
         }
+        StatusChanged?.Invoke(this);
+        return true;
     }
 
     /// <summary>Queued → Canceled. False when it is already running (cancel the token instead).</summary>
@@ -122,8 +132,9 @@ public sealed class DownloadJob(string id, long sequence, DownloadRequest reques
             FinishedAt = DateTimeOffset.UtcNow;
             ExpiresAt = FinishedAt + retention;
             Signal();
-            return true;
         }
+        StatusChanged?.Invoke(this);
+        return true;
     }
 
     public void AddLog(string line)

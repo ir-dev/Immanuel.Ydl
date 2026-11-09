@@ -123,6 +123,10 @@ public static class ProbeMapper
             r.UploadDate = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         if (v.TryGetProperty("tags", out var tags) && tags.ValueKind == JsonValueKind.Array)
             r.Tags = tags.EnumerateArray().Where(t => t.ValueKind == JsonValueKind.String).Select(t => t.GetString()!).Take(12).ToList();
+        r.Categories = ItemMetadata.Strings(v, "categories", 5);
+        r.Genre = Str(v, "genre") ?? ItemMetadata.Strings(v, "genres", 1).FirstOrDefault();
+        r.ChannelId = Str(v, "channel_id");
+        r.Language = Str(v, "language");
     }
 
     private static void MapFormats(ProbeResult r, JsonElement v)

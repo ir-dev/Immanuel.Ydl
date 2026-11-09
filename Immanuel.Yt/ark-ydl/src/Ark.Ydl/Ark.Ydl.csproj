@@ -6,7 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Ark.Ydl</RootNamespace>
     <AssemblyName>Ark.Ydl</AssemblyName>
-    <Version>1.0.0</Version>
+    <!--
+      The release version. Cutting a release means changing it here AND in releases.json ("current" plus a
+      new entry), wwwroot/manifest.webmanifest ("version"), wwwroot/js/version.js and the cache name in
+      wwwroot/sw.js. ReleaseTests fails the build's test run when any of them disagree.
+    -->
+    <Version>1.1.0</Version>
     <Product>ark-ydl</Product>
     <Description>Paste a YouTube link, download the video, audio, a clip or a whole playlist. Powered by yt-dlp + ffmpeg.</Description>
   </PropertyGroup>
@@ -14,6 +19,12 @@
   <ItemGroup>
     <!-- Optional sign-in against the Ark identity server; only wired when ark_oauth_client is configured. -->
     <PackageReference Include="Ark.oAuth.Client" Version="2.1.7" />
+    <!-- Audit log: a local SQLite file written through Ark.Rapid.Database (it also brings the MariaDB/Postgres drivers). -->
+    <PackageReference Include="Ark.Rapid.Database" Version="0.0.23" />
+    <!-- Ark.Rapid.Database 0.0.23 brings MySqlConnector 2.4.0 (GHSA-473q-m89c-ghf8, fixed in 2.6.1). Unused here, but it ships, so pin the fix. -->
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <!-- Reads the DB-IP lite .mmdb that turns an IP into country / region / city for the audit log. -->
+    <PackageReference Include="MaxMind.Db" Version="5.2.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,7 +32,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Runtime data (downloads, bootstrapped tools, yt-dlp cache) never ships. -->
+    <!-- The release manifest ships inside the assembly, so a deployed build can never disagree with its own notes. -->
+    <EmbeddedResource Include="releases.json" LogicalName="Ark.Ydl.releases.json" />
+    <None Remove="releases.json" />
+    <Content Remove="releases.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Runtime data (downloads, bootstrapped tools, yt-dlp cache, audit database) never ships. -->
     <Content Remove="App_Data\**" />
     <None Remove="App_Data\**" />
   </ItemGroup>

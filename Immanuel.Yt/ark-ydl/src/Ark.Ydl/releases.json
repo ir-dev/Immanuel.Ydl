@@ -1,0 +1,106 @@
+{
+  "$comment": "ARK-RAPID (ark-ydl) release manifest. Newest release first. Embedded in the assembly and served by /api/releases. 'current' must equal <Version> in Ark.Ydl.csproj (ReleaseTests checks it). compatibility levels: compatible | config | breaking. migration steps describe upgrading TO that release from the one before it; /api/releases/migration?from=x chains every step after x.",
+  "product": "ARK-RAPID",
+  "app": "ark-ydl",
+  "current": "1.1.0",
+  "releases": [
+    {
+      "version": "1.1.0",
+      "date": "2026-11-10",
+      "title": "Release tracking, audit log and admin console",
+      "summary": "The app now knows and shows its own release, records every request and download in a local SQLite audit log, and has an admin console with ready-made reports.",
+      "changes": {
+        "added": [
+          "Version chip in the footer and an About dialog: this app's version, the version in its web manifest, the latest release and whether an update is available, with what changed and how to upgrade from any earlier version.",
+          "GET /api/version, GET /api/releases and GET /api/releases/migration?from=x.",
+          "Audit log in {DataRoot}/audit/ark-ydl-audit.db (SQLite, written through Ark.Rapid.Database): every HTTP request, and every download with its link, title, channel, YouTube category (genre), tags, duration, format, size, outcome, IP, country/region/city, device, browser, OS, language and time zone.",
+          "Per-day rollups that outlive the raw rows, plus a retention period for the raw rows (Ydl:Audit:RetentionDays, default 365).",
+          "IP geolocation from the free DB-IP lite database, downloaded monthly into {DataRoot}/geoip (CC BY 4.0, attribution shown in the admin console).",
+          "Admin console at /admin: KPI tiles, daily trends, genres, top videos and channels, formats, countries, devices, an hour-by-weekday heat map, failure reasons, searchable download and request logs with CSV export, release and audit-store status.",
+          "POST /api/probe also returns categories, genre, channelId and language."
+        ],
+        "changed": [
+          "GET /api/system gains 'release' and 'audit' objects. Nothing was removed or renamed.",
+          "The page sends an X-Ark-Client header (time zone, screen size, installed-app flag, page version) with its API calls.",
+          "yt-dlp download runs also append each item's metadata to a file in the job folder (--print-to-file), so playlist items get their genre too. Ydl:Audit:CaptureItemMetadata=false turns this off.",
+          "The service worker's cache is named after the release, so every release re-caches the page once."
+        ],
+        "fixed": [],
+        "security": [
+          "The admin console needs an admin key (Ydl:Admin:Key, at least 16 characters) or, with Ark sign-in on, the Ark claim ark-ydl.admin. With neither configured it stays locked; auditing still runs."
+        ]
+      },
+      "compatibility": {
+        "level": "config",
+        "api": { "level": "compatible", "notes": "Additive only: new endpoints and new fields. Existing requests and responses are unchanged." },
+        "config": { "level": "config", "notes": "New optional sections Ydl:Audit, Ydl:Admin, Ydl:Release and ArkDatabase. Every default works; the admin console only needs Ydl:Admin:Key or the Ark claim." },
+        "data": { "level": "compatible", "notes": "Adds an SQLite database under {DataRoot}/audit and a GeoIP file under {DataRoot}/geoip. Nothing existing is touched. Rolling back to 1.0.0 simply ignores both." },
+        "deployment": { "level": "config", "notes": "The publish output now carries SQLite's native library. A win-x64 publish needs a 64-bit app pool (Enable 32-Bit Applications = False); publish win-x86 for a 32-bit pool. If the library can't load, downloads keep working and the admin console reports the audit store as unavailable." },
+        "clients": { "level": "compatible", "notes": "Open pages keep working. An installed app picks up the new page the next time it starts; its downloads list carries over." }
+      },
+      "migration": [
+        { "audience": "operator", "required": false, "title": "Unlock the admin console", "detail": "Set Ydl:Admin:Key to a random secret of 16+ characters in appsettings.Production.json (or the Ydl__Admin__Key environment variable), then open /admin. With Ark sign-in on, granting the Ark claim ark-ydl.admin works instead." },
+        { "audience": "operator", "required": true, "title": "Keep {DataRoot} out of deployment deletes", "detail": "The audit database lives in {DataRoot}/audit. The IIS layout in key_points.txt keeps data in C:\\ark-ydl\\data, outside the site, and is already safe. If DataRoot is the default App_Data inside the site, exclude App_Data from 'remove additional files' (Web Deploy) or mirror copies (robocopy /XD App_Data)." },
+        { "audience": "operator", "required": false, "title": "Check the app pool's bitness", "detail": "A win-x64 publish needs a 64-bit app pool. On a 32-bit pool, publish with -r win-x86 instead, or the audit store can't open (downloads still work)." },
+        { "audience": "operator", "required": false, "title": "Allow the GeoIP download, or turn it off", "detail": "Outbound HTTPS to download.db-ip.com fetches the monthly IP-to-city file (about 60 MB, once a month). Behind a strict firewall, upload an .mmdb and set Ydl:Audit:GeoIp:DatabasePath, use Ydl:Audit:GeoIp:Edition=country (4 MB), or set Ydl:Audit:GeoIp:Enabled=false." },
+        { "audience": "operator", "required": false, "title": "Decide how IPs are stored and for how long", "detail": "Ydl:Audit:IpMode is Full by default; Masked drops the last octet (IPv4) or the last 80 bits (IPv6), Hashed keeps only a salted hash. Ydl:Audit:RetentionDays (default 365) prunes raw rows; daily totals stay. The page now tells users that requests are logged." },
+        { "audience": "operator", "required": false, "title": "Behind a proxy, trust forwarded headers", "detail": "Behind ARR, Cloudflare or Application Gateway the audit log would otherwise record the proxy's IP. See key_points.txt step 7 (ASPNETCORE_FORWARDEDHEADERS_ENABLED). Ydl:Audit:CountryHeader (e.g. CF-IPCountry) takes the country from a trusted CDN header instead of GeoIP." },
+        { "audience": "user", "required": false, "title": "Nothing to do", "detail": "Reload an open page to see the version chip. An installed app updates itself the next time it starts." }
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-11-08",
+      "title": "ARK-RAPID: the yt-dlp generation",
+      "summary": "A from-scratch replacement for the 2017 and 2020 downloaders: ASP.NET Core on .NET 10 driving a self-updating yt-dlp, so YouTube changes no longer break it. Every build deployed up to 2026-11-09 reported 1.0.0, including the later self-bootstrapping of ffmpeg and deno and the ARK-RAPID branding.",
+      "changes": {
+        "added": [
+          "Extraction by yt-dlp: downloaded and SHA-256 verified when missing, self-updated every 24 h.",
+          "Video (144p to 8K, H.264/VP9/AV1, MP4/MKV/WebM), audio only (MP3, M4A, Opus, FLAC, WAV, OGG), clips with the most-replayed heat map, chapters, playlists and channels as ZIP, subtitles, thumbnails and SponsorBlock.",
+          "Downloads panel with live progress over Server-Sent Events, cancel, retry, preview and auto-save.",
+          "Installable app with an Android share target, a bookmarklet and swap-the-domain links (/watch?v=..., /shorts/..., /@handle).",
+          "ffmpeg and deno downloaded into {DataRoot}/tools when the server has none, so it runs on shared hosting where nothing can be installed.",
+          "Optional sign-in against the Ark identity server.",
+          "IIS (in-process) and container (Azure App Service) deployments."
+        ],
+        "changed": [],
+        "fixed": [],
+        "security": [
+          "Strict Content-Security-Policy, per-client rate limits and job limits, allow-listed sites with an SSRF guard, and argument lists (never a shell) for every tool."
+        ]
+      },
+      "compatibility": {
+        "level": "breaking",
+        "api": { "level": "breaking", "notes": "New HTTP API (/api/probe, /api/jobs, ...). Nothing from the legacy apps' MVC or Web API routes exists." },
+        "config": { "level": "breaking", "notes": "appsettings.json (Ydl section) replaces Web.config appSettings." },
+        "data": { "level": "compatible", "notes": "The legacy apps stored nothing, so there is nothing to carry over." },
+        "deployment": { "level": "breaking", "notes": "Needs the ASP.NET Core 10 Hosting Bundle and an app pool with No Managed Code, instead of .NET Framework 4.6." },
+        "clients": { "level": "breaking", "notes": "Old bookmarks to the legacy pages do not resolve; YouTube links pasted or swapped into the new host do." }
+      },
+      "migration": [
+        { "audience": "operator", "required": true, "title": "Deploy ark-ydl as a new site", "detail": "Follow key_points.txt (IIS) or the README (container). It is a new application, not an in-place upgrade." },
+        { "audience": "operator", "required": true, "title": "Revoke the legacy Google credentials", "detail": "Immanuel.Yt.Cmments.Feedback/Key_points.txt holds a Google OAuth client secret and a YouTube Data API key committed to a public repository. Revoke or rotate both in Google Cloud Console; ark-ydl needs no Google key." },
+        { "audience": "operator", "required": false, "title": "Redirect and retire the old site", "detail": "Point the old host name at the new site (or add a redirect), then remove the old site and its .NET Framework app pool." },
+        { "audience": "user", "required": false, "title": "Use the new address", "detail": "Paste any YouTube link, or replace youtube.com with the new host in the address bar." }
+      ]
+    }
+  ],
+  "legacy": [
+    {
+      "id": "legacy-2020",
+      "name": "Immanuel.Yt.Cmments.Feedback (2020)",
+      "date": "2020",
+      "stack": "ASP.NET MVC 5 on .NET Framework 4.6, VideoLibrary 1.3.5 and the YouTube Data API",
+      "summary": "Extracted stream URLs in-process with VideoLibrary; stopped working as YouTube changed its player, signature cipher and bot checks.",
+      "upgradesTo": "1.0.0"
+    },
+    {
+      "id": "legacy-2017",
+      "name": "Immanuel.Yl (2017)",
+      "date": "2017",
+      "stack": "ASP.NET MVC 5 on .NET Framework 4.6 with an in-repo copy of YoutubeExtractor 0.10.11",
+      "summary": "Extracted stream URLs in-process with YoutubeExtractor; broken by the same YouTube changes.",
+      "upgradesTo": "1.0.0"
+    }
+  ]
+}

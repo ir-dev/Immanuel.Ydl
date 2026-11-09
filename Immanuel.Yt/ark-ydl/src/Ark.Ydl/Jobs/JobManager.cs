@@ -24,7 +24,11 @@ public sealed partial class JobManager(IOptions<YdlOptions> opt, YdlPaths paths,
     public IEnumerable<DownloadJob> All => _jobs.Values;
     public TimeSpan Retention => TimeSpan.FromMinutes(Math.Max(5, opt.Value.RetentionMinutes));
 
-    public (DownloadJob? Job, string? Error) Enqueue(DownloadRequest request, UrlAnalysis url, string owner)
+    /// <summary>Raised after a job's status changes (queued → running → completed / failed / canceled).</summary>
+    public event Action<DownloadJob>? StatusChanged;
+
+    /// <param name="created">Runs before the job reaches the queue, so whatever it records comes before any status change.</param>
+    public (DownloadJob? Job, string? Error) Enqueue(DownloadRequest request, UrlAnalysis url, string owner, Action<DownloadJob>? created = null)
     {
         var o = opt.Value;
         var active = _jobs.Values.Count(j => j.Owner == owner && !j.IsTerminal);
@@ -36,11 +40,27 @@ public sealed partial class JobManager(IOptions<YdlOptions> opt, YdlPaths paths,
         var id = NewId();
         var dir = Path.Combine(paths.Downloads, id);
         Directory.CreateDirectory(dir);
-        var job = new DownloadJob(id, Interlocked.Increment(ref _sequence), request, url, dir, owner);
+        var job = new DownloadJob(id, Interlocked.Increment(ref _sequence), request, url, dir, owner)
+        {
+            StatusChanged = OnStatusChanged,
+        };
+        created?.Invoke(job);
         _jobs[id] = job;
         _queue.Writer.TryWrite(job);
         log.LogInformation("Job {Id} queued: {Mode} {Url}", id, request.Mode, url.Url);
         return (job, null);
+    }
+
+    private void OnStatusChanged(DownloadJob job)
+    {
+        try
+        {
+            StatusChanged?.Invoke(job);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "A status listener failed for job {Id}", job.Id); // never let auditing break a download
+        }
     }
 
     public DownloadJob? Get(string id) => JobIdRx().IsMatch(id) && _jobs.TryGetValue(id, out var j) ? j : null;

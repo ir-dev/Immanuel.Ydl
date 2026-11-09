@@ -60,7 +60,104 @@ public sealed class YdlOptions
 
     public ToolOptions Tools { get; set; } = new();
 
+    public AuditOptions Audit { get; set; } = new();
+
+    public AdminOptions Admin { get; set; } = new();
+
+    public ReleaseOptions Release { get; set; } = new();
+
     public static readonly string[] DefaultSites = ["youtube.com", "youtu.be", "youtube-nocookie.com"];
+}
+
+public enum AuditIpMode { Full, Masked, Hashed }
+
+/// <summary>Ydl:Audit — the request / download log kept in a local SQLite file.</summary>
+public sealed class AuditOptions
+{
+    /// <summary>Master switch. Off = nothing is written and the admin console shows no data.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Log every HTTP request (pages and API calls), not only downloads.</summary>
+    public bool LogRequests { get; set; } = true;
+
+    /// <summary>Also log scripts, styles, images and icons. Off by default: a page load fetches a dozen of them.</summary>
+    public bool IncludeStaticFiles { get; set; }
+
+    /// <summary>
+    /// Paths never logged (prefix match). appsettings.json lists /healthz, whose probes would otherwise drown everything
+    /// else. Empty here because configuration binding appends to a list that already has items.
+    /// </summary>
+    public List<string> ExcludePaths { get; set; } = [];
+
+    /// <summary>Raw rows older than this are deleted; the per-day totals stay. 0 = keep everything.</summary>
+    public int RetentionDays { get; set; } = 365;
+
+    /// <summary>Full = as received; Masked = last IPv4 octet / last 80 IPv6 bits zeroed; Hashed = salted SHA-256.</summary>
+    public AuditIpMode IpMode { get; set; } = AuditIpMode.Full;
+
+    /// <summary>Time zone (IANA or Windows id) that decides which day and hour a row belongs to. Default UTC.</summary>
+    public string TimeZone { get; set; } = "UTC";
+
+    /// <summary>Have yt-dlp append each downloaded item's metadata (genre, channel, duration…) to a file in the job folder.</summary>
+    public bool CaptureItemMetadata { get; set; } = true;
+
+    /// <summary>A header a trusted CDN sets with the visitor's country code (e.g. CF-IPCountry). Used before GeoIP.</summary>
+    public string? CountryHeader { get; set; }
+
+    /// <summary>Rows waiting to be written. When full, new rows are dropped (and counted) rather than slowing requests down.</summary>
+    public int QueueCapacity { get; set; } = 20000;
+
+    public GeoIpOptions GeoIp { get; set; } = new();
+}
+
+/// <summary>Ydl:Audit:GeoIp — IP to country / region / city, from the free DB-IP lite database (CC BY 4.0).</summary>
+public sealed class GeoIpOptions
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>city (region + city, about 60 MB download / 130 MB on disk) or country (about 4 MB / 8 MB).</summary>
+    public string Edition { get; set; } = "city";
+
+    /// <summary>Download the database into {DataRoot}/geoip and refresh it monthly.</summary>
+    public bool AutoDownload { get; set; } = true;
+
+    /// <summary>An .mmdb of your own (DB-IP or MaxMind GeoLite2 layout). When set, nothing is downloaded.</summary>
+    public string? DatabasePath { get; set; }
+
+    /// <summary>{base}dbip-{edition}-lite-{yyyy-MM}.mmdb.gz</summary>
+    public string ReleaseBase { get; set; } = "https://download.db-ip.com/free/";
+}
+
+/// <summary>Ydl:Admin — who may open /admin.</summary>
+public sealed class AdminOptions
+{
+    /// <summary>Shared secret typed into the admin console (16+ characters). Null = key sign-in off.</summary>
+    public string? Key { get; set; }
+
+    /// <summary>
+    /// With Ark sign-in on, any of these Ark claims (projected as roles) opens the console without the key.
+    /// appsettings.json lists ark-ydl.admin; empty here because configuration binding appends to a non-empty list.
+    /// </summary>
+    public List<string> Roles { get; set; } = [];
+
+    /// <summary>How long a key sign-in lasts.</summary>
+    public int SessionHours { get; set; } = 12;
+
+    /// <summary>In the Development environment, a request from this machine needs no key when none is configured.</summary>
+    public bool AllowLoopbackInDevelopment { get; set; } = true;
+}
+
+/// <summary>Ydl:Release — where the "latest release" shown in the app comes from.</summary>
+public sealed class ReleaseOptions
+{
+    /// <summary>
+    /// A releases.json published with each release; its "current" is the latest release. Default: this file on
+    /// the repository's master branch. Empty = only the release manifest built into this app.
+    /// </summary>
+    public string? FeedUrl { get; set; } =
+        "https://raw.githubusercontent.com/ir-dev/Immanuel.Ydl/master/Immanuel.Yt/ark-ydl/src/Ark.Ydl/releases.json";
+
+    public int CheckIntervalHours { get; set; } = 12;
 }
 
 public sealed class RateLimitOptions
@@ -147,6 +244,8 @@ public sealed class YdlPaths
         Downloads = Path.GetFullPath(o.DownloadRoot ?? Path.Combine(DataRoot, "downloads"));
         Tools = Path.GetFullPath(o.Tools.Directory ?? Path.Combine(DataRoot, "tools"));
         Cache = Path.Combine(DataRoot, "cache");
+        Audit = Path.Combine(DataRoot, "audit");
+        GeoIp = Path.Combine(DataRoot, "geoip");
         foreach (var d in new[] { DataRoot, Downloads, Tools, Cache })
             System.IO.Directory.CreateDirectory(d);
     }
@@ -155,4 +254,8 @@ public sealed class YdlPaths
     public string Downloads { get; }
     public string Tools { get; }
     public string Cache { get; }
+    /// <summary>The audit database (created on first use).</summary>
+    public string Audit { get; }
+    /// <summary>The downloaded GeoIP database (created on first use).</summary>
+    public string GeoIp { get; }
 }

@@ -88,6 +88,7 @@ public sealed class JobRunner(ToolLocator tools, JobManager jobs, IOptions<YdlOp
         }
 
         Tidy(job);
+        job.Items = ItemMetadata.Read(job.Directory); // before the final state change, which is what the audit log listens to
         var files = JobFiles.Collect(job.Directory);
         List<string> errors, warnings;
         int filtered;
