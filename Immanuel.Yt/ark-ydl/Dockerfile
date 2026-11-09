@@ -20,11 +20,38 @@ RUN dotnet publish src/Ark.Ydl/Ark.Ydl.csproj -c Release -o /app --no-restore /p
 # ── deno: the JavaScript runtime yt-dlp uses to solve YouTube's player challenges ──
 FROM denoland/deno:bin-2.9.8 AS deno
 
+# ── ffmpeg + ffprobe: self-contained static builds, SHA-256 verified ────────
+# The same ffmpeg.martin-riedl.de build the app downloads for itself on macOS/Linux when there is no
+# working ffmpeg. It is baked into the app's tools folder, so a container never downloads it at start.
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}-noble AS ffmpeg
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+ && rm -rf /var/lib/apt/lists/*
+# "release" (latest FFmpeg release) or "snapshot" (latest master build).
+ARG FFMPEG_CHANNEL=release
+ARG TARGETARCH
+RUN set -eux; \
+    arch="${TARGETARCH:-amd64}"; \
+    case "${arch}" in amd64|arm64) ;; *) echo "unsupported architecture: ${arch}"; exit 1 ;; esac; \
+    mkdir -p /out; \
+    cd /tmp; \
+    for tool in ffmpeg ffprobe; do \
+      url="$(curl -fsS -o /dev/null -w '%{redirect_url}' "https://ffmpeg.martin-riedl.de/redirect/latest/linux/${arch}/${FFMPEG_CHANNEL}/${tool}.zip")"; \
+      test -n "${url}"; \
+      curl -fsSL -o "${tool}.zip" "${url}"; \
+      echo "$(curl -fsSL "${url}.sha256" | cut -d' ' -f1)  ${tool}.zip" | sha256sum -c -; \
+      unzip -q -o "${tool}.zip" "${tool}" -d /out; \
+      rm "${tool}.zip"; \
+    done; \
+    chmod 755 /out/ffmpeg /out/ffprobe; \
+    /out/ffmpeg -hide_banner -version > /dev/null; \
+    /out/ffprobe -hide_banner -version > /dev/null
+
 # ── runtime ─────────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}-noble AS final
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deno /deno /usr/local/bin/deno
@@ -48,6 +75,9 @@ RUN set -eux; \
     rm SHA2-256SUMS; \
     chmod 755 yt-dlp; \
     chown -R "${APP_UID}" /opt/ark-ydl
+
+# Root-owned and read-only for the app user. Ydl:Tools finds it as the app's own copy ({Tools}/ffmpeg).
+COPY --from=ffmpeg /out/ /opt/ark-ydl/tools/ffmpeg/
 
 WORKDIR /app
 COPY --from=build /app .

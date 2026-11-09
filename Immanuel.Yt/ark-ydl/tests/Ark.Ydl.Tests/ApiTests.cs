@@ -20,6 +20,7 @@ public sealed class AppFactory : WebApplicationFactory<Program>
         builder.UseSetting("Ydl:DataRoot", DataRoot);
         builder.UseSetting("Ydl:Tools:AutoDownloadYtDlp", "false");
         builder.UseSetting("Ydl:Tools:AutoUpdateYtDlp", "false");
+        builder.UseSetting("Ydl:Tools:AutoDownloadFfmpeg", "false");
         builder.UseSetting("Ydl:Tools:YtDlpPath", Path.Combine(DataRoot, "no-such-yt-dlp"));
     }
 

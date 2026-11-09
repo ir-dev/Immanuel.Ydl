@@ -37,13 +37,19 @@ Choices (format, quality, codec, toggles…) are remembered in the browser.
 
 ## Run it locally
 
-Prerequisites: .NET 10 SDK, **ffmpeg** (with ffprobe), and **deno** (recommended) or **node ≥ 22**.
-yt-dlp is downloaded automatically on first start (into `src/Ark.Ydl/App_Data/tools`) if it is not on
-`PATH`.
+Prerequisites: .NET 10 SDK and **deno** (recommended) or **node ≥ 22**.
+On first start the app downloads what it is missing into `src/Ark.Ydl/App_Data/tools`, checking the
+SHA-256 of each file:
+
+* **yt-dlp**: the official release, if it is not on `PATH`. The app keeps it updated.
+* **ffmpeg + ffprobe**: a self-contained static build (in `tools/ffmpeg/`), used when no ffmpeg on
+  this machine works. macOS and Linux get [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de)
+  release builds (arm64 and x64); Windows gets [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds).
+  It takes about 60 MB (about 200 MB on Windows), once. Delete the folder to fetch a newer build.
 
 ```bash
 dotnet run --project src/Ark.Ydl          # http://localhost:5080
-dotnet test                               # 141 tests
+dotnet test                               # 161 tests
 ```
 
 In VS Code, **F5** (`ark-ydl (http)`, or `ark-ydl (https)` after `dotnet dev-certs https --trust`)
@@ -52,8 +58,9 @@ the browser. `.vscode/` works whether you open this folder or the repo root, and
 build / test / watch / "publish for IIS (win-x64)" tasks.
 
 `GET /api/system` (or the pill in the top bar) shows which yt-dlp / ffmpeg / JS runtime were found.
-A broken install is reported with the reason. For example, a Homebrew ffmpeg whose libraries went
-missing after an upgrade shows `Library not loaded …`; fix it with `brew reinstall ffmpeg`.
+A broken install is reported with the reason. A Homebrew ffmpeg whose libraries were removed by an
+upgrade fails with `Library not loaded …`. The app then skips it and uses its own copy. Lookup
+order: `Tools:FfmpegPath`, then `tools/ffmpeg/`, then `PATH`, then download.
 
 ## Run it in a container
 
@@ -62,9 +69,11 @@ docker build -t ark-ydl .
 docker run --rm -p 8080:8080 ark-ydl      # http://localhost:8080
 ```
 
-The image is `aspnet:10.0-noble` + Ubuntu's ffmpeg + deno 2.9 + the official yt-dlp build
-(checksum-verified; `--build-arg YTDLP_VERSION=2026.10.26` pins one). It runs as the non-root `app`
-user, writes downloads to `/tmp/ark-ydl`, and has a `/healthz` health check.
+The image is `aspnet:10.0-noble` + deno 2.9 + the official yt-dlp build (`--build-arg
+YTDLP_VERSION=2026.10.26` pins one) + the static ffmpeg/ffprobe release build the app would download
+anyway (`--build-arg FFMPEG_CHANNEL=snapshot` for the latest master). Both are checksum-verified
+and baked into the tools folder `/opt/ark-ydl/tools`, so a container start downloads nothing. It runs
+as the non-root `app` user, writes downloads to `/tmp/ark-ydl`, and has a `/healthz` health check.
 
 ### Azure App Service (custom container)
 
@@ -96,6 +105,8 @@ environment variables (`Ydl__RetentionMinutes=60`, `Ydl__CookiesFile=/home/cooki
 | `Tools:YtDlpPath` / `FfmpegPath` | auto | Explicit tool paths. |
 | `Tools:JsRuntime` / `JsRuntimePath` | `auto` | `deno`, `node`, `bun`, `quickjs` or `none`. |
 | `Tools:AutoDownloadYtDlp` | true | Fetch the official release when none is found. |
+| `Tools:AutoDownloadFfmpeg` | true | Fetch a static ffmpeg + ffprobe into `{tools}/ffmpeg` when none that works is found. |
+| `Tools:FfmpegReleaseBase` / `FfmpegWindowsReleaseBase` | martin-riedl.de / yt-dlp FFmpeg-Builds | Download sources (for a mirror). |
 | `Tools:AutoUpdateYtDlp` / `UpdateIntervalHours` | true / 24 | Self-update a yt-dlp this app owns. |
 
 ## Bot checks ("Sign in to confirm you're not a bot")

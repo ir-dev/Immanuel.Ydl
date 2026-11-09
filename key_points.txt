@@ -33,9 +33,9 @@ READ FIRST - what IIS changes for this app
 Folder layout used below (change the drive if you like; keep data on fast local disk, short path):
 
   C:\ark-ydl\site\          published app = IIS physical path (replaced on every deploy)
-  C:\ark-ydl\data\          Ydl:DataRoot -> downloads\, cache\, tools\yt-dlp.exe
-                            (the app downloads yt-dlp.exe itself, verifies it, and self-updates it)
-  C:\ark-ydl\ffmpeg\bin\    ffmpeg.exe + ffprobe.exe
+  C:\ark-ydl\data\          Ydl:DataRoot -> downloads\, cache\, tools\yt-dlp.exe, tools\ffmpeg\
+                            (the app downloads yt-dlp.exe and ffmpeg.exe + ffprobe.exe itself and
+                            verifies them; it also self-updates yt-dlp.exe)
   C:\ark-ydl\deno\          deno.exe
   C:\ark-ydl\drop\          unzipped publish output, copied into site\ by step 5
 
@@ -57,11 +57,11 @@ b) ASP.NET Core 10.0 Hosting Bundle, latest 10.0.x:
      net start w3svc
      dotnet --list-runtimes          # must list Microsoft.AspNetCore.App 10.0.x
 
-c) ffmpeg (ffprobe must sit next to it). yt-dlp's own Windows builds are the best match:
-   https://github.com/yt-dlp/FFmpeg-Builds/releases -> ffmpeg-master-latest-win64-gpl.zip
-   Unzip it and copy the contents of its bin\ folder to C:\ark-ydl\ffmpeg\bin\
-
-     C:\ark-ydl\ffmpeg\bin\ffmpeg.exe -version
+c) ffmpeg: nothing to install. On first start the app downloads yt-dlp's Windows build
+   (https://github.com/yt-dlp/FFmpeg-Builds/releases -> ffmpeg-master-latest-win64-gpl.zip, about
+   200 MB, checked against checksums.sha256) and keeps ffmpeg.exe + ffprobe.exe in
+   C:\ark-ydl\data\tools\ffmpeg\. It does this only when no working ffmpeg is found. To use your own
+   ffmpeg, set Tools:FfmpegPath (step 4); ffprobe.exe must sit next to it.
 
 d) deno >= 2.3 (yt-dlp needs a JavaScript runtime for YouTube):
    https://github.com/denoland/deno/releases -> deno-x86_64-pc-windows-msvc.zip
@@ -74,7 +74,8 @@ d) deno >= 2.3 (yt-dlp needs a JavaScript runtime for YouTube):
    Do not use winget or deno's install.ps1 here: they install into your own user profile, which the
    app pool cannot read.
 
-e) Outbound HTTPS from the server to github.com (yt-dlp download and daily self-update) and to
+e) Outbound HTTPS from the server to github.com and its release-asset download hosts
+   (*.githubusercontent.com): the yt-dlp and ffmpeg downloads and the daily yt-dlp self-update. Also to
    YouTube (youtube.com, *.googlevideo.com, *.ytimg.com).
 
 
@@ -129,10 +130,10 @@ Permissions (the "IIS AppPool\ark-ydl" account exists once the pool does):
 
      icacls C:\ark-ydl\site   /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
      icacls C:\ark-ydl\data   /grant "IIS AppPool\ark-ydl:(OI)(CI)M"
-     icacls C:\ark-ydl\ffmpeg /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
      icacls C:\ark-ydl\deno   /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
 
-   data\ needs Modify: downloads, the yt-dlp cache, and yt-dlp.exe, which "yt-dlp -U" replaces.
+   data\ needs Modify: downloads, the yt-dlp cache, yt-dlp.exe (which "yt-dlp -U" replaces) and
+   tools\ffmpeg\, which the app downloads.
 
 
 4. Configuration (once): C:\ark-ydl\site\appsettings.Production.json
@@ -144,7 +145,6 @@ overwrites it.
        "Ydl": {
          "DataRoot": "C:\\ark-ydl\\data",
          "Tools": {
-           "FfmpegPath": "C:\\ark-ydl\\ffmpeg\\bin\\ffmpeg.exe",
            "JsRuntime": "deno",
            "JsRuntimePath": "C:\\ark-ydl\\deno\\deno.exe"
          }
@@ -153,6 +153,9 @@ overwrites it.
 
 * Backslashes are doubled in JSON.
 * JsRuntime must name the runtime ("deno" or "node"). With "auto", JsRuntimePath is ignored.
+* No FfmpegPath: the app uses its own copy in data\tools\ffmpeg\ (step 1c). A server that already
+  has "FfmpegPath": "C:\\ark-ydl\\ffmpeg\\bin\\ffmpeg.exe" keeps working. Drop the line and that
+  folder whenever you like; the next start then downloads the app's own copy.
 * Any other "Ydl" key from the README's Configuration table can go here (MaxConcurrentJobs,
   RetentionMinutes, MaxFileSize, CookiesFile, Proxy, ...).
 * Optional sign-in, recommended on a public host (an open downloader gets found and abused). Add:
@@ -185,8 +188,8 @@ Every queued and running download is lost (see READ FIRST), so deploy when nobod
 ---------
 a) https://ydl.example.com/healthz
      {"status":"ok","ytDlp":"2026.xx.xx","ffmpeg":"...","js":"deno"}
-   "starting" = still detecting tools (on the very first start it is also downloading yt-dlp.exe
-   into C:\ark-ydl\data\tools, up to a minute). "degraded" = a tool is missing.
+   "starting" = still detecting tools (on the very first start it is also downloading yt-dlp.exe and
+   ffmpeg into C:\ark-ydl\data\tools, a minute or two). "degraded" = a tool is missing.
 b) https://ydl.example.com/api/system -> ok/version/note for each tool; "note" says why one wasn't found.
 c) Real end-to-end test: paste a short YouTube video, download it as video, then as MP3. This is
    the first run against real YouTube; development only ever used a yt-dlp stub. The progress bar
@@ -209,6 +212,9 @@ c) Real end-to-end test: paste a short YouTube video, download it as video, then
   yt-dlp.exe from https://github.com/yt-dlp/yt-dlp/releases/latest yourself and save it as
   C:\ark-ydl\data\tools\yt-dlp.exe. The app still treats it as its own copy and self-updates it
   when it can.
+* "The automatic ffmpeg download failed": same cause. Download ffmpeg-master-latest-win64-gpl.zip
+  from https://github.com/yt-dlp/FFmpeg-Builds/releases/latest yourself and copy bin\ffmpeg.exe and
+  bin\ffprobe.exe into C:\ark-ydl\data\tools\ffmpeg\. The app then uses them as its own copy.
 * A tool is installed but not found: give its full path in appsettings.Production.json. w3wp only
   picks up PATH changes after `net stop was /y; net start w3svc`, and never sees per-user installs.
 * "Sign in to confirm you're not a bot": YouTube challenges datacenter IPs. See the README section

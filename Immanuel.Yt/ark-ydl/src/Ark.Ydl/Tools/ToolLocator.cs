@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
@@ -18,9 +19,10 @@ public sealed record ToolStatus(ToolInfo YtDlp, ToolInfo Ffmpeg, ToolInfo JsRunt
 
 /// <summary>
 /// Finds yt-dlp, ffmpeg and a JavaScript runtime (YouTube extraction has needed one since
-/// yt-dlp 2025.11), downloads the official yt-dlp release when it is missing and keeps it
+/// yt-dlp 2025.11). It downloads the official yt-dlp release when it is missing and keeps it
 /// current: YouTube changes often, and an out-of-date extractor is the usual reason a
-/// downloader "stops working".
+/// downloader "stops working". When no working ffmpeg is installed, it downloads a
+/// self-contained static build into the tools folder, so a deployment needs no system ffmpeg.
 /// </summary>
 public sealed partial class ToolLocator
 {
@@ -46,7 +48,10 @@ public sealed partial class ToolLocator
     public Task WhenInitialized => _ready.Task;
 
     private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-    private string OwnedYtDlpPath => Path.Combine(_paths.Tools, IsWindows ? "yt-dlp.exe" : "yt-dlp");
+    private static string Exe(string name) => IsWindows ? name + ".exe" : name;
+    private string OwnedYtDlpPath => Path.Combine(_paths.Tools, Exe("yt-dlp"));
+    private string OwnedFfmpegDir => Path.Combine(_paths.Tools, "ffmpeg");
+    private string OwnedFfmpegPath => Path.Combine(OwnedFfmpegDir, Exe("ffmpeg"));
 
     /// <summary>True when the yt-dlp in use lives in our tools folder, so self-update is ours to run.</summary>
     public bool OwnsYtDlp => Status.YtDlp.Path is { } p &&
@@ -57,9 +62,12 @@ public sealed partial class ToolLocator
         await _gate.WaitAsync(ct);
         try
         {
-            var yt = await LocateYtDlpAsync(ct);
-            var ff = await LocateFfmpegAsync(ct);
-            var js = await LocateJsRuntimeAsync(ct);
+            // Independent of each other, and on a first start two of them may be downloading.
+            var ytTask = LocateYtDlpAsync(ct);
+            var ffTask = LocateFfmpegAsync(ct);
+            var jsTask = LocateJsRuntimeAsync(ct);
+            await Task.WhenAll(ytTask, ffTask, jsTask);
+            var (yt, ff, js) = (await ytTask, await ffTask, await jsTask);
             Status = new ToolStatus(yt, ff, js, false, DateTimeOffset.UtcNow);
             _log.LogInformation("Tools: yt-dlp {YtVer} ({YtPath}); ffmpeg {FfVer} ({FfPath}); js {Js} {JsVer}",
                 yt.Version, yt.Path, ff.Version, ff.Path, js.Name, js.Version);
@@ -167,64 +175,183 @@ public sealed partial class ToolLocator
         var client = _http.CreateClient("tools");
         _log.LogInformation("Downloading yt-dlp ({Asset}) from {Base}", asset, baseUrl);
 
-        var sums = await client.GetStringAsync(baseUrl + "SHA2-256SUMS", ct);
-        var expected = ExpectedHash(sums, asset) ?? throw new InvalidOperationException($"{asset} is not listed in SHA2-256SUMS.");
-
         var tmp = OwnedYtDlpPath + ".download";
-        using (var resp = await client.GetAsync(baseUrl + asset, HttpCompletionOption.ResponseHeadersRead, ct))
-        {
-            resp.EnsureSuccessStatusCode();
-            await using var src = await resp.Content.ReadAsStreamAsync(ct);
-            await using var dst = File.Create(tmp);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buf = new byte[81920];
-            int n;
-            while ((n = await src.ReadAsync(buf, ct)) > 0)
-            {
-                hash.AppendData(buf, 0, n);
-                await dst.WriteAsync(buf.AsMemory(0, n), ct);
-            }
-            var actual = Convert.ToHexStringLower(hash.GetHashAndReset());
-            if (actual != expected)
-            {
-                dst.Close();
-                File.Delete(tmp);
-                throw new InvalidOperationException($"Checksum mismatch for {asset}: expected {expected}, got {actual}.");
-            }
-        }
-
+        var expected = await DownloadVerifiedAsync(client, new ToolArchive(baseUrl + asset, baseUrl + "SHA2-256SUMS", asset), tmp, ct);
         File.Move(tmp, OwnedYtDlpPath, overwrite: true);
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(OwnedYtDlpPath,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        MakeExecutable(OwnedYtDlpPath);
         _log.LogInformation("yt-dlp saved to {Path} (sha256 {Hash})", OwnedYtDlpPath, expected);
         return OwnedYtDlpPath;
     }
 
     // ── ffmpeg ──────────────────────────────────────────────────────────────
 
-    [GeneratedRegex(@"version\s+(\S+)", RegexOptions.IgnoreCase)]
+    /// <summary>"ffmpeg version 9.0.2-https://www.martin-riedl.de Copyright…" → 9.0.2 (a builder's URL tag is dropped).</summary>
+    [GeneratedRegex(@"version\s+(\S+?)(?:-https?://\S*)?(?:\s|$)", RegexOptions.IgnoreCase)]
     private static partial Regex VersionWordRx();
 
+    internal static string FfmpegVersion(string line) => VersionWordRx().Match(line) is { Success: true } m ? m.Groups[1].Value : line;
+
+    /// <summary>
+    /// Tries the configured path, then the app's own copy ({Tools}/ffmpeg), then PATH. If none of them
+    /// runs (not installed, or a Homebrew ffmpeg whose libraries an upgrade removed), it downloads a
+    /// static build into the tools folder.
+    /// </summary>
     private async Task<ToolInfo> LocateFfmpegAsync(CancellationToken ct)
     {
-        string? broken = null;
-        foreach (var c in new[] { _opt.Tools.FfmpegPath, FindOnPath("ffmpeg") }.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct())
+        string? problem = null;
+        var candidates = new[] { _opt.Tools.FfmpegPath, File.Exists(OwnedFfmpegPath) ? OwnedFfmpegPath : null, FindOnPath("ffmpeg") }
+            .Where(c => !string.IsNullOrWhiteSpace(c)).Distinct();
+        foreach (var c in candidates)
         {
-            var (line, failure) = await ProbeToolAsync(c!, ["-hide_banner", "-version"], ct);
-            if (line is null)
+            if (!File.Exists(c))
             {
-                broken ??= $"ffmpeg at {c} is installed but won't run ({failure}). Reinstall it (e.g. \"brew reinstall ffmpeg\").";
+                problem ??= $"ffmpeg was not found at {c} (Ydl:Tools:FfmpegPath).";
                 continue;
             }
-            var m = VersionWordRx().Match(line);
-            var hasProbe = File.Exists(Path.Combine(Path.GetDirectoryName(c!)!, IsWindows ? "ffprobe.exe" : "ffprobe"));
-            return new ToolInfo("ffmpeg", c, m.Success ? m.Groups[1].Value : line,
-                hasProbe ? null : "ffprobe was not found next to ffmpeg; some post-processing may fail.");
+            var info = await FfmpegInfoAsync(c, ct);
+            if (info.Ok) return info;
+            problem ??= info.Note;
         }
-        return new ToolInfo("ffmpeg", null, null,
-            broken ?? "Not found. Install ffmpeg (needed to merge video+audio, cut clips and convert audio).");
+
+        if (!_opt.Tools.AutoDownloadFfmpeg)
+            return new ToolInfo("ffmpeg", null, null, problem is null
+                ? "Not found. Install ffmpeg (needed to merge video+audio, cut clips and convert audio) or enable Ydl:Tools:AutoDownloadFfmpeg."
+                : problem + " Reinstall it (e.g. \"brew reinstall ffmpeg\") or enable Ydl:Tools:AutoDownloadFfmpeg.");
+
+        var installed = await InstallFfmpegAsync(ct);
+        return installed.Ok || problem is null ? installed : installed with { Note = problem + " " + installed.Note };
+    }
+
+    /// <summary>Runs "ffmpeg -version". If it fails, the result has no path, and the reason is in the note.</summary>
+    private async Task<ToolInfo> FfmpegInfoAsync(string path, CancellationToken ct, string? note = null)
+    {
+        var (line, failure) = await ProbeToolAsync(path, ["-hide_banner", "-version"], ct);
+        if (line is null) return new ToolInfo("ffmpeg", null, null, $"ffmpeg at {path} won't run ({failure}).");
+        var hasProbe = File.Exists(Path.Combine(Path.GetDirectoryName(path) ?? "", Exe("ffprobe")));
+        return new ToolInfo("ffmpeg", path, FfmpegVersion(line),
+            hasProbe ? note : "ffprobe was not found next to ffmpeg; some post-processing may fail.");
+    }
+
+    /// <summary>Downloads this platform's static ffmpeg + ffprobe into {Tools}/ffmpeg and checks that it runs.</summary>
+    internal async Task<ToolInfo> InstallFfmpegAsync(CancellationToken ct)
+    {
+        try
+        {
+            var (path, source) = await DownloadFfmpegAsync(ct);
+            var info = await FfmpegInfoAsync(path, ct, $"Downloaded a static build from {source} (SHA-256 verified).");
+            return info.Ok ? info : info with { Note = "Downloaded ffmpeg, but " + info.Note };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogError(ex, "Could not download ffmpeg");
+            return new ToolInfo("ffmpeg", null, null, "The automatic ffmpeg download failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>One file to download: its URL, the checksum file that lists it (null = "{URL after redirects}.sha256"), and the name it is listed under.</summary>
+    internal sealed record ToolArchive(string Url, string? SumsUrl, string Name);
+
+    /// <summary>
+    /// Where this platform's static ffmpeg + ffprobe come from. macOS and Linux use ffmpeg.martin-riedl.de,
+    /// which has one self-contained zip per tool with a .sha256 file beside it ("latest" redirects to a
+    /// versioned folder). Windows uses yt-dlp's FFmpeg-Builds: one zip, listed in checksums.sha256.
+    /// Returns null when neither source has a build for the platform.
+    /// </summary>
+    internal static IReadOnlyList<ToolArchive>? FfmpegArchives(ToolOptions o, OSPlatform os, Architecture arch)
+    {
+        if (os == OSPlatform.Windows)
+        {
+            var flavor = arch switch { Architecture.X64 => "win64", Architecture.Arm64 => "winarm64", Architecture.X86 => "win32", _ => null };
+            if (flavor is null) return null;
+            var b = o.FfmpegWindowsReleaseBase.TrimEnd('/') + "/";
+            var zip = $"ffmpeg-master-latest-{flavor}-gpl.zip";
+            return [new ToolArchive(b + zip, b + "checksums.sha256", zip)];
+        }
+        var system = os == OSPlatform.OSX ? "macos" : os == OSPlatform.Linux ? "linux" : null;
+        var cpu = arch switch { Architecture.X64 => "amd64", Architecture.Arm64 => "arm64", _ => null };
+        if (system is null || cpu is null) return null;
+        var root = $"{o.FfmpegReleaseBase.TrimEnd('/')}/{system}/{cpu}/release/";
+        return [new ToolArchive(root + "ffmpeg.zip", null, "ffmpeg.zip"), new ToolArchive(root + "ffprobe.zip", null, "ffprobe.zip")];
+    }
+
+    private static OSPlatform CurrentOs =>
+        IsWindows ? OSPlatform.Windows
+        : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? OSPlatform.OSX
+        : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? OSPlatform.Linux
+        : OSPlatform.FreeBSD;
+
+    private async Task<(string Path, string Source)> DownloadFfmpegAsync(CancellationToken ct)
+    {
+        var archives = FfmpegArchives(_opt.Tools, CurrentOs, RuntimeInformation.OSArchitecture)
+                       ?? throw new PlatformNotSupportedException($"No static ffmpeg build is published for {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}).");
+        var client = _http.CreateClient("tools");
+        string[] wanted = [Exe("ffmpeg"), Exe("ffprobe")];
+
+        // Build the folder under a temporary name and move it in at the end, so the app never
+        // sees half an install.
+        var staging = OwnedFfmpegDir + ".download";
+        if (Directory.Exists(staging)) Directory.Delete(staging, true);
+        Directory.CreateDirectory(staging);
+        try
+        {
+            foreach (var a in archives)
+            {
+                _log.LogInformation("Downloading ffmpeg: {Url}", a.Url);
+                var zip = Path.Combine(staging, "archive.zip");
+                var sha = await DownloadVerifiedAsync(client, a, zip, ct);
+                ExtractNamed(zip, staging, wanted);
+                File.Delete(zip);
+                _log.LogInformation("{Name} verified (sha256 {Hash})", a.Name, sha);
+            }
+            foreach (var w in wanted)
+            {
+                var p = Path.Combine(staging, w);
+                if (!File.Exists(p)) throw new InvalidOperationException($"{w} was not in the downloaded archive.");
+                MakeExecutable(p);
+            }
+            if (Directory.Exists(OwnedFfmpegDir)) Directory.Delete(OwnedFfmpegDir, true);
+            // On Windows, antivirus often scans a freshly written .exe for a moment, and the rename
+            // fails until it lets go.
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    Directory.Move(staging, OwnedFfmpegDir);
+                    break;
+                }
+                catch (Exception ex) when (attempt < 10 && ex is IOException or UnauthorizedAccessException)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                }
+            }
+        }
+        catch
+        {
+            try { Directory.Delete(staging, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
+        _log.LogInformation("ffmpeg saved to {Dir}", OwnedFfmpegDir);
+        return (OwnedFfmpegPath, new Uri(archives[0].Url).Host);
+    }
+
+    /// <summary>
+    /// Extracts the zip entries whose file name is in <paramref name="names"/>, wherever they sit in the
+    /// archive, flat into <paramref name="dir"/>. A file is always written under one of those names and
+    /// never under the entry's own path, so a crafted entry cannot write outside the folder.
+    /// </summary>
+    internal static int ExtractNamed(string zipPath, string dir, IReadOnlyCollection<string> names)
+    {
+        var cmp = IsWindows ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var done = new HashSet<string>(cmp);
+        using var zip = ZipFile.OpenRead(zipPath);
+        foreach (var e in zip.Entries)
+        {
+            var name = e.FullName.Replace('\\', '/').Split('/')[^1];
+            var match = names.FirstOrDefault(n => cmp.Equals(n, name));
+            if (match is null || !done.Add(match)) continue;
+            e.ExtractToFile(Path.Combine(dir, match), overwrite: true);
+        }
+        return done.Count;
     }
 
     // ── JavaScript runtime ──────────────────────────────────────────────────
@@ -260,6 +387,49 @@ public sealed partial class ToolLocator
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Streams <paramref name="a"/> to <paramref name="dest"/> and checks its SHA-256 against the
+    /// published checksum file. Returns the hash.
+    /// </summary>
+    private static async Task<string> DownloadVerifiedAsync(HttpClient client, ToolArchive a, string dest, CancellationToken ct)
+    {
+        string actual;
+        Uri final;
+        using (var resp = await client.GetAsync(a.Url, HttpCompletionOption.ResponseHeadersRead, ct))
+        {
+            resp.EnsureSuccessStatusCode();
+            final = resp.RequestMessage?.RequestUri ?? new Uri(a.Url);
+            await using var src = await resp.Content.ReadAsStreamAsync(ct);
+            await using var dst = File.Create(dest);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buf = new byte[81920];
+            int n;
+            while ((n = await src.ReadAsync(buf, ct)) > 0)
+            {
+                hash.AppendData(buf, 0, n);
+                await dst.WriteAsync(buf.AsMemory(0, n), ct);
+            }
+            actual = Convert.ToHexStringLower(hash.GetHashAndReset());
+        }
+
+        // A "latest" link redirects to a versioned file, and that file's .sha256 sits next to it.
+        var sums = await client.GetStringAsync(a.SumsUrl ?? final.AbsoluteUri + ".sha256", ct);
+        var expected = ExpectedHash(sums, a.Name);
+        if (expected == actual) return expected;
+        File.Delete(dest);
+        throw new InvalidOperationException(expected is null
+            ? $"{a.Name} is not listed in its checksum file."
+            : $"Checksum mismatch for {a.Name}: expected {expected}, got {actual}.");
+    }
+
+    private static void MakeExecutable(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
 
     private static string? HomeBin(params string[] parts)
     {

@@ -77,8 +77,20 @@ public sealed class ToolOptions
     /// <summary>Explicit yt-dlp path. Default: the tools folder, then PATH, then download.</summary>
     public string? YtDlpPath { get; set; }
 
-    /// <summary>Explicit ffmpeg path (ffprobe is expected next to it). Default: PATH.</summary>
+    /// <summary>Explicit ffmpeg path (ffprobe is expected next to it). Default: {Tools}/ffmpeg, then PATH, then download.</summary>
     public string? FfmpegPath { get; set; }
+
+    /// <summary>
+    /// When no working ffmpeg is found, download a self-contained static ffmpeg + ffprobe
+    /// (SHA-256 verified) into {Tools}/ffmpeg.
+    /// </summary>
+    public bool AutoDownloadFfmpeg { get; set; } = true;
+
+    /// <summary>macOS / Linux static builds: {base}{macos|linux}/{amd64|arm64}/release/{ffmpeg,ffprobe}.zip, each with a .sha256.</summary>
+    public string FfmpegReleaseBase { get; set; } = "https://ffmpeg.martin-riedl.de/redirect/latest/";
+
+    /// <summary>Windows static builds (yt-dlp/FFmpeg-Builds): ffmpeg-master-latest-{win64|winarm64|win32}-gpl.zip + checksums.sha256.</summary>
+    public string FfmpegWindowsReleaseBase { get; set; } = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/";
 
     /// <summary>auto | deno | node | bun | quickjs | none. YouTube needs one since yt-dlp 2025.11.</summary>
     public string JsRuntime { get; set; } = "auto";

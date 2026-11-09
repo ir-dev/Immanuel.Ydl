@@ -127,7 +127,7 @@ function renderSystem() {
   ].join('\n');
   $('#app-version').textContent = s.version ? `v${s.version}` : '';
 
-  if (s.preparing) showBanner('warn', 'Getting the download engine ready — on the first start this downloads yt-dlp. One moment…');
+  if (s.preparing) showBanner('warn', 'Getting the download engine ready — on the first start this downloads yt-dlp (and ffmpeg if the server has none). One moment…');
   else if (!t.ytDlp.ok) showBanner('err', `The download engine (yt-dlp) isn't available on this server. ${t.ytDlp.note || ''}`);
   else if (!t.ffmpeg.ok) showBanner('warn', `ffmpeg is missing on the server, so merging, clipping and audio conversion won't work. ${t.ffmpeg.note || ''}`);
   else if (!t.jsRuntime.ok) showBanner('warn', 'The server has no JavaScript runtime (deno or node ≥ 22). YouTube downloads may fail or be limited to low quality.');
