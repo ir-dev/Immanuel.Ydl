@@ -1,33 +1,44 @@
-/* ark-ydl — one stylesheet, design tokens on :root, light + dark. */
+/* ARK-RAPID (ark-ydl) — one stylesheet, design tokens on :root, light + dark.
+   Palette from the logo: navy hull #0d2841, teal arrow + sea #1d7b8c, gold sun #d0a548. */
 
 :root {
-  --bg: #f5f6fb;
-  --bg-glow: rgb(91 75 255 / 10%);
+  --bg: #f4f6f9;
+  --bg-glow: rgb(29 123 140 / 11%);
+  --bg-glow-2: rgb(208 165 72 / 16%);
   --surface: #ffffff;
-  --surface-2: #f6f7fc;
-  --surface-3: #eef0f8;
-  --border: #e2e4f0;
-  --border-strong: #cfd2e4;
-  --text: #15162c;
-  --muted: #5b5f7e;
-  --faint: #8a8eab;
-  --accent: #5b4bff;
-  --accent-2: #a23cff;
+  --surface-2: #f6f8fb;
+  --surface-3: #edf1f5;
+  --border: #dde3eb;
+  --border-strong: #c6cfdb;
+  --text: #0f2440;
+  --muted: #4d5f76;
+  --faint: #7d8ca0;
+  --accent: #1d7b8c;
+  --accent-2: #0f4c63;
   --accent-ink: #ffffff;
-  --accent-soft: #eeebff;
-  --accent-text: #4a3be6;
+  --accent-soft: #e1f0f2;
+  --accent-text: #156b7b;
+  --gold: #c99b3c;
+  --gold-soft: #f9f0db;
+  --gold-text: #8a6413;
+  --grad-text: linear-gradient(120deg, #1d7b8c 10%, #0f4c63 90%);
+  /* colours of the logo symbols in /img/mark.svg (they inherit into the <use> shadow tree) */
+  --mark-ink: #0d2841;
+  --mark-sun: #d0a548;
+  --mark-sea: #1d7b8c;
+  --mark-word: #0d2841;
   --ok: #138a5c;
   --ok-soft: #e3f6ee;
   --warn: #a8670a;
   --warn-soft: #fdf3e1;
   --err: #cc3344;
   --err-soft: #fde9eb;
-  --info-soft: #e9f1ff;
-  --heat: rgb(91 75 255 / 22%);
-  --range: rgb(91 75 255 / 20%);
-  --shadow-sm: 0 1px 2px rgb(18 20 45 / 6%);
-  --shadow: 0 1px 2px rgb(18 20 45 / 5%), 0 10px 30px -12px rgb(18 20 45 / 14%);
-  --shadow-lg: 0 24px 60px -20px rgb(18 20 45 / 28%);
+  --info-soft: #e7f1f5;
+  --heat: rgb(29 123 140 / 22%);
+  --range: rgb(29 123 140 / 18%);
+  --shadow-sm: 0 1px 2px rgb(13 40 65 / 7%);
+  --shadow: 0 1px 2px rgb(13 40 65 / 5%), 0 10px 30px -12px rgb(13 40 65 / 16%);
+  --shadow-lg: 0 24px 60px -20px rgb(13 40 65 / 30%);
   --radius: 18px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -39,29 +50,39 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0c0d18;
-    --bg-glow: rgb(124 109 255 / 16%);
-    --surface: #14152a;
-    --surface-2: #1a1c34;
-    --surface-3: #22243f;
-    --border: #2a2c48;
-    --border-strong: #3a3d60;
-    --text: #ecedf8;
-    --muted: #a6a9c8;
-    --faint: #7b7fa2;
-    --accent: #7d6dff;
-    --accent-2: #b45cff;
-    --accent-soft: #24214a;
-    --accent-text: #b3a9ff;
+    --bg: #081525;
+    --bg-glow: rgb(43 151 168 / 16%);
+    --bg-glow-2: rgb(220 178 87 / 13%);
+    --surface: #0e1f33;
+    --surface-2: #12263d;
+    --surface-3: #183049;
+    --border: #1f3651;
+    --border-strong: #2c4766;
+    --text: #edf1f6;
+    --muted: #a2b1c4;
+    --faint: #75879e;
+    --accent: #36adc0;
+    --accent-2: #2490a3;
+    --accent-ink: #04161f;
+    --accent-soft: #0f3341;
+    --accent-text: #6fcad8;
+    --gold: #dcb257;
+    --gold-soft: #2c2412;
+    --gold-text: #e8c574;
+    --grad-text: linear-gradient(120deg, #f3d68e 10%, #d6a648 90%);
+    --mark-ink: #f5f0e6;
+    --mark-sun: #dcb257;
+    --mark-sea: #2fa5b8;
+    --mark-word: #f3eee4;
     --ok: #3fcf91;
-    --ok-soft: #12302a;
+    --ok-soft: #10302a;
     --warn: #f0b04a;
-    --warn-soft: #33270f;
+    --warn-soft: #30260f;
     --err: #ff6b7a;
-    --err-soft: #3a1820;
-    --info-soft: #1a2442;
-    --heat: rgb(125 109 255 / 30%);
-    --range: rgb(125 109 255 / 26%);
+    --err-soft: #391821;
+    --info-soft: #12283f;
+    --heat: rgb(54 173 192 / 30%);
+    --range: rgb(54 173 192 / 24%);
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
     --shadow-lg: 0 30px 70px -20px rgb(0 0 0 / 70%);
@@ -70,29 +91,39 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0c0d18;
-  --bg-glow: rgb(124 109 255 / 16%);
-  --surface: #14152a;
-  --surface-2: #1a1c34;
-  --surface-3: #22243f;
-  --border: #2a2c48;
-  --border-strong: #3a3d60;
-  --text: #ecedf8;
-  --muted: #a6a9c8;
-  --faint: #7b7fa2;
-  --accent: #7d6dff;
-  --accent-2: #b45cff;
-  --accent-soft: #24214a;
-  --accent-text: #b3a9ff;
+  --bg: #081525;
+  --bg-glow: rgb(43 151 168 / 16%);
+  --bg-glow-2: rgb(220 178 87 / 13%);
+  --surface: #0e1f33;
+  --surface-2: #12263d;
+  --surface-3: #183049;
+  --border: #1f3651;
+  --border-strong: #2c4766;
+  --text: #edf1f6;
+  --muted: #a2b1c4;
+  --faint: #75879e;
+  --accent: #36adc0;
+  --accent-2: #2490a3;
+  --accent-ink: #04161f;
+  --accent-soft: #0f3341;
+  --accent-text: #6fcad8;
+  --gold: #dcb257;
+  --gold-soft: #2c2412;
+  --gold-text: #e8c574;
+  --grad-text: linear-gradient(120deg, #f3d68e 10%, #d6a648 90%);
+  --mark-ink: #f5f0e6;
+  --mark-sun: #dcb257;
+  --mark-sea: #2fa5b8;
+  --mark-word: #f3eee4;
   --ok: #3fcf91;
-  --ok-soft: #12302a;
+  --ok-soft: #10302a;
   --warn: #f0b04a;
-  --warn-soft: #33270f;
+  --warn-soft: #30260f;
   --err: #ff6b7a;
-  --err-soft: #3a1820;
-  --info-soft: #1a2442;
-  --heat: rgb(125 109 255 / 30%);
-  --range: rgb(125 109 255 / 26%);
+  --err-soft: #391821;
+  --info-soft: #12283f;
+  --heat: rgb(54 173 192 / 30%);
+  --range: rgb(54 173 192 / 24%);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -14px rgb(0 0 0 / 60%);
   --shadow-lg: 0 30px 70px -20px rgb(0 0 0 / 70%);
@@ -109,7 +140,9 @@ body {
   color: var(--text);
   background:
     radial-gradient(1100px 500px at 50% -180px, var(--bg-glow), transparent 70%),
+    radial-gradient(520px 300px at 50% 150px, var(--bg-glow-2), transparent 70%),
     var(--bg);
+  background-repeat: no-repeat;
   overflow-x: hidden;
 }
 img { max-width: 100%; display: block; }
@@ -175,9 +208,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 .topbar-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 12px; }
-.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 750; font-size: 1.12rem; color: var(--text); letter-spacing: -.01em; }
+.brand { display: inline-flex; align-items: center; gap: 11px; color: var(--text); min-width: 0; }
 .brand:hover { text-decoration: none; }
-.brand-dot { color: var(--accent); margin: 0 1px; }
+.brand svg { display: block; overflow: visible; }
+/* Rays are hairlines at this size: hide them, the mark reads as arch + play + arrow + hull. */
+.brand-mark { width: 31px; height: 38px; flex: none; --mark-rays: 0; transition: transform .25s var(--ease); }
+.brand:hover .brand-mark { transform: translateY(-1px) scale(1.04); }
+.brand-text { display: grid; gap: 5px; }
+.brand-word { width: 129px; height: 14px; } /* wordmark is 9.2 : 1 */
+.brand-tag {
+  font-size: 8.5px; line-height: 1; font-weight: 650; text-transform: uppercase;
+  letter-spacing: .385em; color: var(--gold-text); white-space: nowrap;
+}
 .topbar-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -190,7 +232,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pill.err::before { background: var(--err); }
 .badge {
   position: absolute; top: 2px; right: 1px; min-width: 17px; height: 17px; padding: 0 4px;
-  border-radius: 99px; background: var(--accent); color: #fff; font-size: .68rem; font-weight: 700;
+  border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: .68rem; font-weight: 700;
   display: grid; place-items: center;
 }
 .user-box { display: flex; align-items: center; gap: 8px; font-size: .88rem; color: var(--muted); margin: 0; }
@@ -198,8 +240,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ── hero ─────────────────────────────────────────────────────────────── */
 .hero { padding: 54px 0 22px; text-align: center; }
+/* The logo emblem, rising out of a faint sunburst — the rays of the logo, continued past the arch. */
+.hero-mark {
+  position: relative; isolation: isolate;
+  width: 98px; height: 118px; margin: 0 auto 20px;
+  animation: rise .6s var(--ease) both;
+}
+.hero-mark .mark { position: relative; display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 12px 22px rgb(13 40 65 / 16%)); }
+.hero-mark::before, .hero-mark::after {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  left: 50%; top: 46%; translate: -50% -50%; border-radius: 50%;
+}
+.hero-mark::before {
+  width: 340px; height: 340px;
+  background: repeating-conic-gradient(from -1deg, var(--gold) 0deg 1.1deg, transparent 1.1deg 7.5deg);
+  /* fades out well before the edge, so the rays never run under the sticky header */
+  -webkit-mask: radial-gradient(closest-side, transparent 32%, #000 44%, rgb(0 0 0 / 25%) 66%, transparent 84%);
+  mask: radial-gradient(closest-side, transparent 32%, #000 44%, rgb(0 0 0 / 25%) 66%, transparent 84%);
+  opacity: .30;
+  animation: dawn 1.4s var(--ease) both;
+}
+.hero-mark::after { width: 230px; height: 230px; background: radial-gradient(closest-side, var(--bg-glow-2), transparent); }
+@keyframes dawn { from { opacity: 0; rotate: -14deg; scale: .85; } }
 .hero h1 { font-size: clamp(1.9rem, 4.6vw, 3.1rem); letter-spacing: -.035em; font-weight: 800; }
-.grad { background: linear-gradient(120deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.grad { background: var(--grad-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hero .sub { color: var(--muted); font-size: 1.05rem; margin: 12px auto 26px; max-width: 560px; }
 .url-form { display: flex; gap: 10px; max-width: 780px; margin: 0 auto; }
 .url-box {
@@ -259,7 +323,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: rgb(0 0 0 / 78%); color: #fff; font-size: .78rem; font-weight: 650;
   padding: 2px 7px; border-radius: 6px;
 }
-.thumb .tag { left: 8px; right: auto; background: var(--accent); }
+.thumb .tag { left: 8px; right: auto; background: var(--accent); color: var(--accent-ink); }
 .info { min-width: 0; display: grid; gap: 8px; }
 .info .title { font-size: 1.28rem; font-weight: 720; letter-spacing: -.015em; overflow-wrap: anywhere; }
 .meta-line { color: var(--muted); font-size: .92rem; display: flex; flex-wrap: wrap; gap: 4px 10px; }
@@ -321,7 +385,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .qchip:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .qchip strong { font-size: 1.02rem; letter-spacing: -.01em; display: flex; align-items: center; gap: 6px; }
-.qchip strong em { font-style: normal; font-size: .68rem; font-weight: 750; color: var(--accent-text); background: var(--accent-soft); border-radius: 5px; padding: 1px 5px; }
+.qchip strong em { font-style: normal; font-size: .68rem; font-weight: 750; color: var(--gold-text); background: var(--gold-soft); border-radius: 5px; padding: 1px 5px; }
 .qchip span { color: var(--faint); font-size: .78rem; }
 .qchip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .qchip[aria-pressed="true"] span { color: var(--accent-text); }
@@ -477,7 +541,7 @@ details.more[open] > summary::after { transform: rotate(180deg); }
 .job.failed .job-state .st { color: var(--err); }
 .job.canceled .job-state .st { color: var(--faint); }
 .bar { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; position: relative; }
-.bar > i { position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: inherit; transition: width .45s var(--ease); }
+.bar > i { position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 40%, var(--gold))); border-radius: inherit; transition: width .45s var(--ease); }
 .bar.indeterminate > i { width: 35%; animation: slide 1.3s ease-in-out infinite; }
 .job.completed .bar > i { background: var(--ok); }
 .job.failed .bar, .job.canceled .bar { display: none; }
@@ -520,9 +584,19 @@ details.more[open] > summary::after { transform: rotate(180deg); }
 .tip h3 .ico { color: var(--accent); }
 .tip p { margin: 6px 0 0; color: var(--muted); font-size: .9rem; }
 .tip-example code { overflow-wrap: anywhere; }
-.bookmarklet { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-weight: 700; cursor: grab; }
+.bookmarklet { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--accent-ink); font-weight: 700; cursor: grab; }
 .bookmarklet:hover { text-decoration: none; }
-.footer { margin-top: 40px; padding: 26px 0 40px; border-top: 1px solid var(--border); font-size: .86rem; color: var(--muted); text-align: center; }
+/* The footer opens with the logo's sea: three teal swells instead of a hairline border. */
+.footer { position: relative; margin-top: 48px; padding: 34px 0 40px; font-size: .86rem; color: var(--muted); text-align: center; }
+.footer::before {
+  content: ""; position: absolute; top: 0; left: 50%; translate: -50% 0;
+  width: min(560px, calc(100% - 32px)); height: 14px;
+  background: linear-gradient(90deg, transparent, var(--accent) 22%, var(--accent) 78%, transparent);
+  opacity: .55;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 560 14' preserveAspectRatio='none'%3E%3Cpath d='M0 7C40 0 120 0 170 7C120 3 50 3 0 7ZM200 9C260 14 300 14 360 9C300 12 260 12 200 9ZM390 7C440 0 520 0 560 7C520 3 440 3 390 7Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 560 14' preserveAspectRatio='none'%3E%3Cpath d='M0 7C40 0 120 0 170 7C120 3 50 3 0 7ZM200 9C260 14 300 14 360 9C300 12 260 12 200 9ZM390 7C440 0 520 0 560 7C520 3 440 3 390 7Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.footer-mark { display: block; width: 26px; height: 32px; margin: 0 auto 12px; --mark-rays: 0; opacity: .9; }
 .footer p { margin: 4px 0; }
 
 /* ── toasts ───────────────────────────────────────────────────────────── */
@@ -539,7 +613,10 @@ details.more[open] > summary::after { transform: rotate(180deg); }
 
 /* ── responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
-  .hero { padding: 30px 0 16px; }
+  .hero { padding: 38px 0 16px; }
+  .hero-mark { width: 78px; height: 94px; margin-bottom: 14px; }
+  .hero-mark::before { width: 270px; height: 270px; }
+  .hero-mark::after { width: 180px; height: 180px; }
   .url-form { flex-direction: column; }
   .go-btn { width: 100%; padding: .95em; }
   .paste-btn span:last-child { display: none; }
@@ -555,6 +632,12 @@ details.more[open] > summary::after { transform: rotate(180deg); }
   .topbar-actions .pill { display: none; }
   .seg button { padding: 8px 11px; }
   .cta-bar { margin: 0 -14px -14px; padding: 12px 14px 14px; }
+}
+@media (max-width: 360px) {
+  .brand { gap: 9px; }
+  .brand-mark { width: 27px; height: 33px; }
+  .brand-word { width: 108px; height: 12px; }
+  .brand-tag { display: none; }
 }
 @media (max-width: 480px) {
   .seg.wide button { flex-direction: column; gap: 2px; padding: 7px 6px; font-size: .84rem; }

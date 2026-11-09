@@ -1,7 +1,8 @@
 // ark-ydl service worker: makes the app installable and keeps the shell usable on a flaky
 // connection. Network first, always — the API and downloads are never cached.
-const CACHE = 'ark-ydl-shell-v1';
-const SHELL = ['/', '/css/app.css', '/js/app.js', '/js/util.js', '/js/api.js', '/js/clip.js', '/js/jobs.js', '/img/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'ark-ydl-shell-v2';
+const SHELL = ['/', '/css/app.css', '/js/app.js', '/js/util.js', '/js/api.js', '/js/clip.js', '/js/jobs.js',
+  '/img/mark.svg', '/img/icon.svg', '/img/favicon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));

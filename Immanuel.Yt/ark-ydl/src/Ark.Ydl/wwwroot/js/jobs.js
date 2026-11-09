@@ -324,7 +324,8 @@ export class JobList {
 
 function notify(title, body) {
   if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
-  try { new Notification(title, { body, icon: '/img/icon.svg', tag: 'ark-ydl' }); } catch { /* some browsers only allow SW notifications */ }
+  // PNG: not every platform's notification centre renders an SVG icon.
+  try { new Notification(title, { body, icon: '/img/icon-192.png', tag: 'ark-ydl' }); } catch { /* some browsers only allow SW notifications */ }
 }
 
 export function askNotificationPermission() {

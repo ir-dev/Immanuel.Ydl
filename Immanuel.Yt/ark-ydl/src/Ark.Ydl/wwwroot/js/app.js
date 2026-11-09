@@ -966,9 +966,16 @@ function bindGlobal() {
   $('#btn-clear-done').addEventListener('click', () => jobs.clearFinished());
 }
 
+// Matches --bg in app.css, so the mobile address bar / installed-app title bar blends into the page.
+const THEME_COLOR = { light: '#f4f6f9', dark: '#081525' };
+
 function applyTheme(t) {
   if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  for (const meta of $$('meta[name="theme-color"]')) {
+    const scheme = (meta.getAttribute('media') || '').includes('dark') ? 'dark' : 'light';
+    meta.content = THEME_COLOR[t === 'dark' || t === 'light' ? t : scheme];
+  }
 }
 
 function setupExtras() {

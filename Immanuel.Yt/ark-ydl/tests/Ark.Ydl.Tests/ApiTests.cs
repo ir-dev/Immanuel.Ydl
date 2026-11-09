@@ -59,7 +59,7 @@ public class ApiTests(AppFactory factory) : IClassFixture<AppFactory>
         Assert.Contains("frame-src https://www.youtube-nocookie.com", csp);
         Assert.Contains("frame-ancestors 'none'", csp);
         Assert.Equal("strict-origin-when-cross-origin", res.Headers.GetValues("Referrer-Policy").Single());
-        Assert.Contains("ark-ydl", await res.Content.ReadAsStringAsync());
+        Assert.Contains("ARK-RAPID", await res.Content.ReadAsStringAsync());
     }
 
     [Theory]
@@ -68,11 +68,50 @@ public class ApiTests(AppFactory factory) : IClassFixture<AppFactory>
     [InlineData("/manifest.webmanifest", "application/manifest+json")]
     [InlineData("/sw.js", "text/javascript")]
     [InlineData("/img/icon.svg", "image/svg+xml")]
+    [InlineData("/img/mark.svg", "image/svg+xml")]
+    [InlineData("/favicon.ico", "image/x-icon")]
+    [InlineData("/img/apple-touch-icon.png", "image/png")]
     public async Task ServesAssets(string path, string type)
     {
         var res = await Client().GetAsync(path);
         res.EnsureSuccessStatusCode();
         Assert.Equal(type, res.Content.Headers.ContentType?.MediaType);
+    }
+
+    /// <summary>Every icon the manifest and the page name exists, and every logo symbol the page
+    /// uses (&lt;use href="/img/mark.svg#…"&gt;) is defined — a missing one only shows up as a blank box.</summary>
+    [Fact]
+    public async Task EveryReferencedIconAndLogoSymbolExists()
+    {
+        var client = Client();
+        var manifest = await client.GetFromJsonAsync<JsonElement>("/manifest.webmanifest");
+        var icons = manifest.GetProperty("icons").EnumerateArray().ToList();
+        Assert.Contains(icons, i => i.GetProperty("purpose").GetString() == "maskable");
+        var page = await client.GetStringAsync("/");
+        var links = System.Text.RegularExpressions.Regex.Matches(page, "<link rel=\"(?:icon|apple-touch-icon)\" href=\"([^\"]+)\"")
+            .Select(m => m.Groups[1].Value).ToList();
+        Assert.Contains("/favicon.ico", links);
+
+        foreach (var src in icons.Select(i => i.GetProperty("src").GetString()!).Concat(links))
+        {
+            var res = await client.GetAsync(src);
+            Assert.True(res.IsSuccessStatusCode, $"{src} → {(int)res.StatusCode}");
+            if (src.EndsWith(".png"))
+            {
+                var bytes = await res.Content.ReadAsByteArrayAsync();
+                Assert.True(bytes.Length > 24 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G', $"{src} is not a PNG");
+                // IHDR width/height, big-endian at offsets 16 and 20
+                var w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+                var h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+                var declared = icons.FirstOrDefault(i => i.GetProperty("src").GetString() == src);
+                if (declared.ValueKind == JsonValueKind.Object)
+                    Assert.Equal(declared.GetProperty("sizes").GetString(), $"{w}x{h}");
+            }
+        }
+
+        var symbols = await client.GetStringAsync("/img/mark.svg");
+        foreach (var id in System.Text.RegularExpressions.Regex.Matches(page, "href=\"/img/mark\\.svg#([\\w-]+)\"").Select(m => m.Groups[1].Value).Distinct())
+            Assert.Contains($"<symbol id=\"{id}\"", symbols);
     }
 
     [Fact]

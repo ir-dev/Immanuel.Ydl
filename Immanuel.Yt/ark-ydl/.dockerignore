@@ -13,3 +13,6 @@ tests/
 .dockerignore
 *.md
 az_deploy.txt
+
+# brand sources + generator; the built assets live in wwwroot
+branding/

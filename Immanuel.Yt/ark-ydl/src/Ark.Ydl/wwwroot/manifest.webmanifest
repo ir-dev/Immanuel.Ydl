@@ -1,16 +1,20 @@
 {
-  "name": "ark-ydl — YouTube downloader",
-  "short_name": "ark-ydl",
+  "name": "ARK-RAPID video downloader",
+  "short_name": "ARK-RAPID",
   "description": "Paste a YouTube link and download the video, the audio, a clip or a whole playlist.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0c0d18",
-  "theme_color": "#5b4bff",
+  "background_color": "#081525",
+  "theme_color": "#0d2841",
   "icons": [
     { "src": "/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/img/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/img/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/img/icon-monochrome.png", "sizes": "512x512", "type": "image/png", "purpose": "monochrome" }
   ],
   "share_target": {
     "action": "/",

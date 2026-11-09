@@ -3,14 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>ark-ydl · YouTube downloader</title>
+  <title>ARK-RAPID · Video downloader</title>
   <meta name="description" content="Paste a YouTube link and download the video, the audio, a clip or a whole playlist — in the quality you choose.">
-  <meta name="theme-color" content="#f5f6fb" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0c0d18" media="(prefers-color-scheme: dark)">
+  <meta name="application-name" content="ARK-RAPID">
+  <meta name="apple-mobile-web-app-title" content="ARK-RAPID">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#081525" media="(prefers-color-scheme: dark)">
   <meta name="color-scheme" content="light dark">
-  <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/img/icon.svg">
-  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <!-- use-credentials: with sign-in on, an anonymous manifest fetch would be bounced to the IdP. -->
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
   <link rel="stylesheet" href="/css/app.css">
   <script type="module" src="/js/app.js"></script>
 </head>
@@ -19,9 +23,12 @@
 
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="/" aria-label="ark-ydl home">
-        <img src="/img/icon.svg" alt="" width="28" height="28">
-        <span>ark<span class="brand-dot">·</span>ydl</span>
+      <a class="brand" href="/" aria-label="ARK-RAPID video downloader, home">
+        <svg class="brand-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+        <span class="brand-text" aria-hidden="true">
+          <svg class="brand-word"><use href="/img/mark.svg#wordmark" width="100%" height="100%"/></svg>
+          <span class="brand-tag">Video downloader</span>
+        </span>
       </a>
       <div class="topbar-actions">
         <span id="sys-pill" class="pill" hidden></span>
@@ -39,6 +46,9 @@
 
   <main class="wrap">
     <section class="hero" id="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <svg class="mark"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+      </div>
       <h1>Download anything from <span class="grad">YouTube</span>.</h1>
       <p class="sub">Videos, Shorts, music, clips and whole playlists — in the quality and format you choose.</p>
 
@@ -87,7 +97,7 @@
         <article class="tip">
           <h3><span data-icon="bookmark"></span>One-click bookmarklet</h3>
           <p>Drag this button to your bookmarks bar, then click it on any YouTube video.</p>
-          <p><a id="bookmarklet" class="bookmarklet" href="#">⤓ ark-ydl</a></p>
+          <p><a id="bookmarklet" class="bookmarklet" href="#">⤓ ARK-RAPID</a></p>
         </article>
         <article class="tip">
           <h3><span data-icon="scissors"></span>Clip from a timestamp</h3>
@@ -99,7 +109,7 @@
         </article>
         <article class="tip" id="tip-install" hidden>
           <h3><span data-icon="install"></span>Install the app</h3>
-          <p>Add ark-ydl to your home screen or dock. On Android you can then share a video from the YouTube app straight to it.</p>
+          <p>Add ARK-RAPID to your home screen or dock. On Android you can then share a video from the YouTube app straight to it.</p>
           <p><button id="btn-install" class="ghost small" type="button">Install</button></p>
         </article>
       </div>
@@ -108,8 +118,9 @@
 
   <footer class="footer">
     <div class="wrap">
+      <svg class="footer-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
       <p>Download only content you own or have permission to save, and respect creators and YouTube's Terms of Service.</p>
-      <p class="muted">ark-ydl <span id="app-version"></span> · powered by <a href="https://github.com/yt-dlp/yt-dlp" rel="noopener" target="_blank">yt-dlp</a> and <a href="https://ffmpeg.org" rel="noopener" target="_blank">ffmpeg</a></p>
+      <p class="muted">ARK-RAPID <span id="app-version"></span> · powered by <a href="https://github.com/yt-dlp/yt-dlp" rel="noopener" target="_blank">yt-dlp</a> and <a href="https://ffmpeg.org" rel="noopener" target="_blank">ffmpeg</a></p>
     </div>
   </footer>
 
