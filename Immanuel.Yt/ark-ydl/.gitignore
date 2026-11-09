@@ -1,0 +1,8 @@
+bin/
+obj/
+App_Data/
+.vs/
+.vscode/
+.idea/
+*.user
+TestResults/

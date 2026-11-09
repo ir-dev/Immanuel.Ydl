@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Ark.Ydl</RootNamespace>
+    <AssemblyName>Ark.Ydl</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>ark-ydl</Product>
+    <Description>Paste a YouTube link, download the video, audio, a clip or a whole playlist. Powered by yt-dlp + ffmpeg.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Optional sign-in against the Ark identity server; only wired when ark_oauth_client is configured. -->
+    <PackageReference Include="Ark.oAuth.Client" Version="2.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ark.Ydl.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Runtime data (downloads, bootstrapped tools, yt-dlp cache) never ships. -->
+    <Content Remove="App_Data\**" />
+    <None Remove="App_Data\**" />
+  </ItemGroup>
+
+</Project>
