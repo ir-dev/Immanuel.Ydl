@@ -46,6 +46,11 @@ dotnet run --project src/Ark.Ydl          # http://localhost:5080
 dotnet test                               # 141 tests
 ```
 
+In VS Code, **F5** (`ark-ydl (http)`, or `ark-ydl (https)` after `dotnet dev-certs https --trust`)
+builds, starts the app under the debugger with the `Properties/launchSettings.json` profile and opens
+the browser. `.vscode/` works whether you open this folder or the repo root, and also carries
+build / test / watch / "publish for IIS (win-x64)" tasks.
+
 `GET /api/system` (or the pill in the top bar) shows which yt-dlp / ffmpeg / JS runtime were found.
 A broken install is reported with the reason. For example, a Homebrew ffmpeg whose libraries went
 missing after an upgrade shows `Library not loaded …`; fix it with `brew reinstall ffmpeg`.

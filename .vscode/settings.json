@@ -1,0 +1,5 @@
+{
+  // Three solutions live under this folder; only ark-ydl builds on macOS/Linux (the other two are
+  // .NET Framework 4.x). Point C# Dev Kit at it so IntelliSense and Test Explorer load the right one.
+  "dotnet.defaultSolution": "Immanuel.Yt/ark-ydl/ark-ydl.sln"
+}

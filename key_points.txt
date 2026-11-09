@@ -1,0 +1,213 @@
+
+
+
+ark-ydl - deploy to a Windows IIS server
+==========================================
+
+App: Immanuel.Yt/ark-ydl (ASP.NET Core .NET 10 + yt-dlp + ffmpeg + deno), hosted in-process in IIS.
+Run every command below in an elevated (Run as administrator) PowerShell on the server unless noted.
+
+
+READ FIRST - what IIS changes for this app
+------------------------------------------
+* Jobs live in memory inside the single IIS worker process (w3wp). A recycle, stop or deploy loses
+  every queued/running download, and on start the app deletes the job folders left by the previous
+  run. So the app pool must: never idle out, never recycle on a timer, never overlap an old and a
+  new worker, and run exactly ONE worker process. A second worker (web garden) would not see the
+  other's jobs and would delete its job folders every 2 minutes.
+* w3wp does not see your admin account's PATH or user profile, and with Tools:JsRuntime = "auto"
+  the app ignores Tools:JsRuntimePath. Every tool path is therefore set explicitly (step 4).
+* Download progress is streamed with Server-Sent Events. IIS dynamic compression buffers them (the
+  progress bar jumps from 0 to done), so it is switched off for this site (step 3).
+* Use https. The Paste button, "install as app" and the service worker only work on https.
+
+Folder layout used below (change the drive if you like; keep data on fast local disk, short path):
+
+  C:\ark-ydl\site\          published app = IIS physical path (replaced on every deploy)
+  C:\ark-ydl\data\          Ydl:DataRoot -> downloads\, cache\, tools\yt-dlp.exe
+                            (the app downloads yt-dlp.exe itself, verifies it, and self-updates it)
+  C:\ark-ydl\ffmpeg\bin\    ffmpeg.exe + ffprobe.exe
+  C:\ark-ydl\deno\          deno.exe
+  C:\ark-ydl\drop\          unzipped publish output, copied into site\ by step 5
+
+
+1. Server prerequisites (once)
+------------------------------
+Windows Server 2019 / 2022 / 2025. (IIS on Windows 10/11 allows only 10 concurrent requests, and
+every open downloads panel holds one.)
+
+a) IIS with Application Initialization:
+
+     Install-WindowsFeature Web-Server, Web-AppInit, Web-Mgmt-Console
+
+b) ASP.NET Core 10.0 Hosting Bundle, latest 10.0.x:
+   https://dotnet.microsoft.com/download/dotnet/10.0 -> ASP.NET Core Runtime -> Windows -> Hosting Bundle
+   Install it AFTER IIS (if IIS was added later, run the installer again and choose Repair). Then:
+
+     net stop was /y
+     net start w3svc
+     dotnet --list-runtimes          # must list Microsoft.AspNetCore.App 10.0.x
+
+c) ffmpeg (ffprobe must sit next to it). yt-dlp's own Windows builds are the best match:
+   https://github.com/yt-dlp/FFmpeg-Builds/releases -> ffmpeg-master-latest-win64-gpl.zip
+   Unzip it and copy the contents of its bin\ folder to C:\ark-ydl\ffmpeg\bin\
+
+     C:\ark-ydl\ffmpeg\bin\ffmpeg.exe -version
+
+d) deno >= 2.3 (yt-dlp needs a JavaScript runtime for YouTube):
+   https://github.com/denoland/deno/releases -> deno-x86_64-pc-windows-msvc.zip
+   Unzip deno.exe to C:\ark-ydl\deno\deno.exe
+
+     C:\ark-ydl\deno\deno.exe --version
+
+   (Alternative: the Node.js 22+ MSI, machine-wide in C:\Program Files\nodejs\. Then use
+   "JsRuntime": "node" and "JsRuntimePath": "C:\\Program Files\\nodejs\\node.exe" in step 4.)
+   Do not use winget or deno's install.ps1 here: they install into your own user profile, which the
+   app pool cannot read.
+
+e) Outbound HTTPS from the server to github.com (yt-dlp download and daily self-update) and to
+   YouTube (youtube.com, *.googlevideo.com, *.ytimg.com).
+
+
+2. Publish (on the dev machine; macOS is fine)
+-----------------------------------------------
+VS Code: Terminal -> Run Task -> "ark-ydl: publish for IIS (win-x64)"
+or, from Immanuel.Yt/ark-ydl:
+
+     dotnet publish src/Ark.Ydl/Ark.Ydl.csproj -c Release -r win-x64 --self-contained false -o src/Ark.Ydl/bin/publish/iis
+
+Output: src/Ark.Ydl/bin/publish/iis (Ark.Ydl.exe, web.config with AspNetCoreModuleV2,
+hostingModel="inprocess", wwwroot\ ...). Zip it and copy the zip to the server:
+
+     cd src/Ark.Ydl/bin/publish/iis && zip -rX ../ark-ydl-iis.zip . && cd -
+
+(Visual Studio on Windows gives the same result: Publish -> Folder, Release, net10.0, win-x64,
+framework-dependent.)
+
+
+3. App pool + site (once)
+-------------------------
+     Import-Module WebAdministration
+     New-Item -ItemType Directory -Force -Path C:\ark-ydl\site, C:\ark-ydl\data, C:\ark-ydl\drop | Out-Null
+
+     $pool = 'ark-ydl'
+     New-WebAppPool -Name $pool
+     $p = "IIS:\AppPools\$pool"
+     Set-ItemProperty $p -Name managedRuntimeVersion -Value ''                     # No Managed Code
+     Set-ItemProperty $p -Name startMode -Value AlwaysRunning
+     Set-ItemProperty $p -Name processModel.idleTimeout -Value '00:00:00'          # never idle out
+     Set-ItemProperty $p -Name processModel.loadUserProfile -Value $true           # TEMP + LOCALAPPDATA for yt-dlp.exe, deno, sign-in keys
+     Set-ItemProperty $p -Name processModel.maxProcesses -Value 1                  # exactly one worker
+     Set-ItemProperty $p -Name recycling.periodicRestart.time -Value '00:00:00'    # no 29-hour recycle
+     Set-ItemProperty $p -Name recycling.disallowOverlappingRotation -Value $true  # old and new worker never overlap
+
+     New-Website -Name ark-ydl -PhysicalPath C:\ark-ydl\site -ApplicationPool $pool -Port 80 -HostHeader ydl.example.com
+     Set-ItemProperty IIS:\Sites\ark-ydl -Name applicationDefaults.preloadEnabled -Value $true   # start at boot, not on first visit
+
+     # SSE progress must not be buffered (harmless if Dynamic Content Compression isn't installed):
+     Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Location 'ark-ydl' `
+       -Filter 'system.webServer/urlCompression' -Name doDynamicCompression -Value $false
+
+   Replace ydl.example.com with your host name. With no host name, use another port or stop
+   'Default Web Site' first (it owns port 80).
+
+HTTPS: IIS Manager -> Sites -> ark-ydl -> Bindings -> Add: https, 443, host name, tick
+"Require Server Name Indication", pick the certificate (win-acme gives a free Let's Encrypt one).
+Keep port 80 only if you add an http->https redirect (IIS URL Rewrite module); the app has none.
+Open 443 (and 80) on any cloud network security group or external firewall.
+
+Permissions (the "IIS AppPool\ark-ydl" account exists once the pool does):
+
+     icacls C:\ark-ydl\site   /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
+     icacls C:\ark-ydl\data   /grant "IIS AppPool\ark-ydl:(OI)(CI)M"
+     icacls C:\ark-ydl\ffmpeg /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
+     icacls C:\ark-ydl\deno   /grant "IIS AppPool\ark-ydl:(OI)(CI)RX"
+
+   data\ needs Modify: downloads, the yt-dlp cache, and yt-dlp.exe, which "yt-dlp -U" replaces.
+
+
+4. Configuration (once): C:\ark-ydl\site\appsettings.Production.json
+--------------------------------------------------------------------
+IIS runs the app as Production, so this file is loaded on top of appsettings.json. Step 5 never
+overwrites it.
+
+     {
+       "Ydl": {
+         "DataRoot": "C:\\ark-ydl\\data",
+         "Tools": {
+           "FfmpegPath": "C:\\ark-ydl\\ffmpeg\\bin\\ffmpeg.exe",
+           "JsRuntime": "deno",
+           "JsRuntimePath": "C:\\ark-ydl\\deno\\deno.exe"
+         }
+       }
+     }
+
+* Backslashes are doubled in JSON.
+* JsRuntime must name the runtime ("deno" or "node"). With "auto", JsRuntimePath is ignored.
+* Any other "Ydl" key from the README's Configuration table can go here (MaxConcurrentJobs,
+  RetentionMinutes, MaxFileSize, CookiesFile, Proxy, ...).
+* Optional sign-in, recommended on a public host (an open downloader gets found and abused). Add:
+
+       "ark_oauth_client": { "Authority": "https://<ark-host>/<tenant>", "ClientId": "<client-id>" }
+
+  On the Ark client, register BOTH https://ydl.example.com/signin-oidc and
+  https://ydl.example.com/signout-callback-oidc (matched byte for byte), and map each user to the
+  client: without the mapping, sign-in fails with what looks like a wrong password. Load User
+  Profile (step 3) keeps the sign-in cookie keys across restarts, so users stay signed in.
+
+
+5. Deploy / update (every release)
+----------------------------------
+Every queued and running download is lost (see READ FIRST), so deploy when nobody is downloading.
+
+     Import-Module WebAdministration
+     Remove-Item C:\ark-ydl\drop\* -Recurse -Force -ErrorAction SilentlyContinue
+     Expand-Archive C:\path\to\ark-ydl-iis.zip -DestinationPath C:\ark-ydl\drop -Force
+     Stop-WebAppPool -Name ark-ydl
+     while ((Get-WebAppPoolState -Name ark-ydl).Value -ne 'Stopped') { Start-Sleep -Seconds 1 }
+     robocopy C:\ark-ydl\drop C:\ark-ydl\site /MIR /XF appsettings.Production.json /XD logs /R:10 /W:3
+     Start-WebAppPool -Name ark-ydl
+
+* /MIR removes files a release no longer has. /XF and /XD keep the server's config and logs.
+  Robocopy exit codes 0-7 mean success; 8 or more means failure.
+
+
+6. Verify
+---------
+a) https://ydl.example.com/healthz
+     {"status":"ok","ytDlp":"2026.xx.xx","ffmpeg":"...","js":"deno"}
+   "starting" = still detecting tools (on the very first start it is also downloading yt-dlp.exe
+   into C:\ark-ydl\data\tools, up to a minute). "degraded" = a tool is missing.
+b) https://ydl.example.com/api/system -> ok/version/note for each tool; "note" says why one wasn't found.
+c) Real end-to-end test: paste a short YouTube video, download it as video, then as MP3. This is
+   the first run against real YouTube; development only ever used a yt-dlp stub. The progress bar
+   should move smoothly. If it jumps from 0 to done, SSE is being buffered: check the
+   compression step in 3.
+
+
+7. Troubleshooting
+------------------
+* 500.19: Hosting Bundle missing, or installed before IIS (run it again -> Repair).
+* 500.30 / 500.31: the app or the .NET runtime failed to start. Check `dotnet --list-runtimes` and
+  Event Viewer -> Windows Logs -> Application (source "IIS AspNetCore Module V2"). For the full
+  exception: in C:\ark-ydl\site\web.config set stdoutLogEnabled="true", create C:\ark-ydl\site\logs,
+  grant the pool Modify on it, recycle, then read logs\stdout_*.log. Turn it off again afterwards
+  (the next deploy overwrites web.config anyway).
+* 503: the app pool stopped (Rapid-Fail Protection after repeated crashes). See Event Viewer ->
+  System (source WAS), fix the cause, then Start-WebAppPool ark-ydl.
+* The app's own warnings (tool not found, yt-dlp update failed) also go to the Application log.
+* "yt-dlp: Not found and the automatic download failed": outbound github.com is blocked. Download
+  yt-dlp.exe from https://github.com/yt-dlp/yt-dlp/releases/latest yourself and save it as
+  C:\ark-ydl\data\tools\yt-dlp.exe. The app still treats it as its own copy and self-updates it
+  when it can.
+* A tool is installed but not found: give its full path in appsettings.Production.json. w3wp only
+  picks up PATH changes after `net stop was /y; net start w3svc`, and never sees per-user installs.
+* "Sign in to confirm you're not a bot": YouTube challenges datacenter IPs. See the README section
+  "Bot checks" (Ydl:CookiesFile from a throwaway account, Ydl:Proxy).
+* Behind a load balancer or reverse proxy (ARR, Cloudflare, Application Gateway), the per-IP limits
+  see only the proxy's address. Only in that case (the header is spoofable when clients reach IIS
+  directly), trust X-Forwarded-For:
+
+     & "$env:windir\system32\inetsrv\appcmd.exe" set config -section:system.applicationHost/applicationPools `
+       /+"[name='ark-ydl'].environmentVariables.[name='ASPNETCORE_FORWARDEDHEADERS_ENABLED',value='true']" /commit:apphost
+     Restart-WebAppPool -Name ark-ydl
