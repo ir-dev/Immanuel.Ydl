@@ -46,12 +46,16 @@ SHA-256 of each file:
 * **yt-dlp**: the official release, if it is not on `PATH`. The app keeps it updated.
 * **ffmpeg + ffprobe**: a self-contained static build (in `tools/ffmpeg/`), used when no ffmpeg on
   this machine works. macOS and Linux get [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de)
-  release builds (arm64 and x64); Windows gets [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds).
+  release builds (arm64 and x64); Windows gets [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds),
+  fetched through the GitHub REST API (github.com's `/releases/download/latest/` route times out with
+  504 for that repo), then on x64 falls back to [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)'s release
+  essentials build. Each request is retried on a timeout or a 408/429/5xx answer. If every source fails,
+  the app tries again in the background (10 min, then doubling, up to every 6 h) until one works.
   It takes about 60 MB (about 200 MB on Windows), once. Delete the folder to fetch a newer build.
 
 ```bash
 dotnet run --project src/Ark.Ydl          # http://localhost:5080
-dotnet test                               # 161 tests
+dotnet test                               # 172 tests
 ```
 
 In VS Code, **F5** (`ark-ydl (http)`, or `ark-ydl (https)` after `dotnet dev-certs https --trust`)
@@ -108,7 +112,8 @@ environment variables (`Ydl__RetentionMinutes=60`, `Ydl__CookiesFile=/home/cooki
 | `Tools:JsRuntime` / `JsRuntimePath` | `auto` | `deno`, `node`, `bun`, `quickjs` or `none`. |
 | `Tools:AutoDownloadYtDlp` | true | Fetch the official release when none is found. |
 | `Tools:AutoDownloadFfmpeg` | true | Fetch a static ffmpeg + ffprobe into `{tools}/ffmpeg` when none that works is found. |
-| `Tools:FfmpegReleaseBase` / `FfmpegWindowsReleaseBase` | martin-riedl.de / yt-dlp FFmpeg-Builds | Download sources (for a mirror). |
+| `Tools:FfmpegReleaseBase` / `FfmpegWindowsReleaseBase` | martin-riedl.de / yt-dlp FFmpeg-Builds | Download sources (for a mirror). Empty `FfmpegWindowsReleaseBase` skips it. |
+| `Tools:FfmpegWindowsFallbackUrl` | gyan.dev release essentials | Windows x64 fallback zip (`.sha256` beside it). Empty = none. |
 | `Tools:AutoUpdateYtDlp` / `UpdateIntervalHours` | true / 24 | Self-update a yt-dlp this app owns. |
 
 ## Bot checks ("Sign in to confirm you're not a bot")

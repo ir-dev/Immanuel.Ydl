@@ -20,7 +20,9 @@ public class FfmpegArchiveTests
     [InlineData("Linux", Architecture.Arm64, "linux/arm64")]
     public void MacAndLinuxGetOneZipPerToolWithASha256BesideIt(string os, Architecture arch, string folder)
     {
-        var a = ToolLocator.FfmpegArchives(O, OSPlatform.Create(os.ToUpperInvariant()), arch)!;
+        var s = Assert.Single(ToolLocator.FfmpegSources(O, OSPlatform.Create(os.ToUpperInvariant()), arch));
+        Assert.Equal("ffmpeg.martin-riedl.de", s.Label);
+        var a = s.Archives;
         Assert.Equal(2, a.Count);
         Assert.Equal($"https://ffmpeg.martin-riedl.de/redirect/latest/{folder}/release/ffmpeg.zip", a[0].Url);
         Assert.Equal($"https://ffmpeg.martin-riedl.de/redirect/latest/{folder}/release/ffprobe.zip", a[1].Url);
@@ -32,9 +34,11 @@ public class FfmpegArchiveTests
     [InlineData(Architecture.X64, "win64")]
     [InlineData(Architecture.Arm64, "winarm64")]
     [InlineData(Architecture.X86, "win32")]
-    public void WindowsGetsYtDlpsBuildListedInChecksums(Architecture arch, string flavor)
+    public void WindowsGetsYtDlpsBuildListedInChecksumsFirst(Architecture arch, string flavor)
     {
-        var a = Assert.Single(ToolLocator.FfmpegArchives(O, OSPlatform.Windows, arch)!);
+        var s = ToolLocator.FfmpegSources(O, OSPlatform.Windows, arch)[0];
+        Assert.Equal("github.com/yt-dlp/FFmpeg-Builds", s.Label);
+        var a = Assert.Single(s.Archives);
         const string b = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/";
         Assert.Equal($"{b}ffmpeg-master-latest-{flavor}-gpl.zip", a.Url);
         Assert.Equal(b + "checksums.sha256", a.SumsUrl);
@@ -42,17 +46,53 @@ public class FfmpegArchiveTests
     }
 
     [Fact]
+    public void WindowsX64FallsBackToGyanDevWithTheSha256BesideIt()
+    {
+        var all = ToolLocator.FfmpegSources(O, OSPlatform.Windows, Architecture.X64);
+        Assert.Equal(["github.com/yt-dlp/FFmpeg-Builds", "www.gyan.dev"], all.Select(s => s.Label));
+        var a = Assert.Single(all[1].Archives);
+        Assert.Equal("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip", a.Url);
+        Assert.Null(a.SumsUrl);
+
+        // gyan.dev builds only x64; either source can be switched off.
+        Assert.Single(ToolLocator.FfmpegSources(O, OSPlatform.Windows, Architecture.Arm64));
+        Assert.Equal(["www.gyan.dev"], ToolLocator.FfmpegSources(new ToolOptions { FfmpegWindowsReleaseBase = "" }, OSPlatform.Windows, Architecture.X64).Select(s => s.Label));
+        Assert.Equal(["github.com/yt-dlp/FFmpeg-Builds"], ToolLocator.FfmpegSources(new ToolOptions { FfmpegWindowsFallbackUrl = null }, OSPlatform.Windows, Architecture.X64).Select(s => s.Label));
+    }
+
+    [Fact]
     public void UnsupportedPlatformsGetNothing()
     {
-        Assert.Null(ToolLocator.FfmpegArchives(O, OSPlatform.Linux, Architecture.Arm));
-        Assert.Null(ToolLocator.FfmpegArchives(O, OSPlatform.FreeBSD, Architecture.X64));
+        Assert.Empty(ToolLocator.FfmpegSources(O, OSPlatform.Linux, Architecture.Arm));
+        Assert.Empty(ToolLocator.FfmpegSources(O, OSPlatform.FreeBSD, Architecture.X64));
     }
 
     [Fact]
     public void ConfiguredMirrorIsUsed()
     {
-        var a = ToolLocator.FfmpegArchives(new ToolOptions { FfmpegReleaseBase = "https://mirror.test/ff" }, OSPlatform.Linux, Architecture.X64)!;
-        Assert.Equal("https://mirror.test/ff/linux/amd64/release/ffmpeg.zip", a[0].Url);
+        var s = Assert.Single(ToolLocator.FfmpegSources(new ToolOptions { FfmpegReleaseBase = "https://mirror.test/ff" }, OSPlatform.Linux, Architecture.X64));
+        Assert.Equal("mirror.test", s.Label);
+        Assert.Equal("https://mirror.test/ff/linux/amd64/release/ffmpeg.zip", s.Archives[0].Url);
+    }
+
+    [Fact]
+    public void GitHubReleaseFilesAreRecognised()
+    {
+        var f = ToolLocator.GitHubReleaseFile("https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/checksums.sha256")!;
+        Assert.Equal(("yt-dlp", "FFmpeg-Builds", "latest", "checksums.sha256"), (f.Owner, f.Repo, f.Tag, f.Name));
+        Assert.Equal("https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releases/tags/latest", f.ReleaseApiUrl);
+        Assert.Null(ToolLocator.GitHubReleaseFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"));
+        Assert.Null(ToolLocator.GitHubReleaseFile("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"));
+        Assert.Null(ToolLocator.GitHubReleaseFile(null));
+    }
+
+    [Fact]
+    public void ABareHashCountsOnlyForTheFileItSitsBeside()
+    {
+        var h = new string('A', 64);
+        Assert.Equal(new string('a', 64), ToolLocator.ExpectedHash(h, "x.zip", bareHash: true));
+        Assert.Null(ToolLocator.ExpectedHash(h, "x.zip"));
+        Assert.Null(ToolLocator.ExpectedHash("not-a-hash", "x.zip", bareHash: true));
     }
 
     [Theory]
@@ -162,12 +202,34 @@ public sealed class FfmpegInstallTests : IDisposable
         }
     }
 
+    /// <summary>A server made of one function; it records each request as "{Accept} {URL}".</summary>
+    private sealed class Fake(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            Requests.Add($"{req.Headers.Accept} {req.RequestUri!.AbsoluteUri}".Trim());
+            var resp = answer(req);
+            resp.RequestMessage ??= req;
+            return Task.FromResult(resp);
+        }
+    }
+
+    private static HttpResponseMessage Answer(HttpStatusCode code, byte[]? body = null, string? redirectedTo = null) => new(code)
+    {
+        Content = new ByteArrayContent(body ?? []),
+        RequestMessage = redirectedTo is null ? null : new HttpRequestMessage(HttpMethod.Get, redirectedTo),
+    };
+
+    private static HttpResponseMessage Answer(string text) => Answer(HttpStatusCode.OK, Encoding.UTF8.GetBytes(text));
+
     private sealed class Factory(HttpMessageHandler h) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(h, disposeHandler: false);
     }
 
-    private (ToolLocator Tools, YdlPaths Paths) Create(FakeMirror mirror)
+    private (ToolLocator Tools, YdlPaths Paths) Create(HttpMessageHandler server)
     {
         var o = new YdlOptions
         {
@@ -182,7 +244,128 @@ public sealed class FfmpegInstallTests : IDisposable
             },
         };
         var paths = new YdlPaths(o, _root);
-        return (new ToolLocator(Microsoft.Extensions.Options.Options.Create(o), paths, new Factory(mirror), NullLogger<ToolLocator>.Instance), paths);
+        var tools = new ToolLocator(Microsoft.Extensions.Options.Options.Create(o), paths, new Factory(server), NullLogger<ToolLocator>.Instance)
+        {
+            RetryDelay = TimeSpan.Zero,
+        };
+        return (tools, paths);
+    }
+
+    // Windows sources as configured by default, except on test hosts. The archives hold "ffmpeg" and
+    // "ffprobe" without .exe because the test runs them on macOS / Linux.
+    private const string Gh = "https://github.com/acme/ff-builds/releases/download/latest/";
+    private const string GhApi = "https://api.github.com/repos/acme/ff-builds/releases";
+    private const string GhZip = "ffmpeg-master-latest-win64-gpl.zip";
+    private const string Gyan = "https://dl.test/builds/ffmpeg-release-essentials.zip";
+    private const string GyanVersioned = "https://dl.test/builds/packages/ffmpeg-9.9-essentials_build.zip";
+
+    private static IReadOnlyList<ToolLocator.FfmpegSource> WindowsSources() =>
+        ToolLocator.FfmpegSources(new ToolOptions { FfmpegWindowsReleaseBase = Gh, FfmpegWindowsFallbackUrl = Gyan }, OSPlatform.Windows, Architecture.X64);
+
+    private static byte[] BuildZip(string folder) =>
+        Zip(($"{folder}/bin/ffmpeg", Script), ($"{folder}/bin/ffprobe", Script), ($"{folder}/bin/ffplay", "x"), ($"{folder}/LICENSE.txt", "GPL"));
+
+    /// <summary>
+    /// Answers like GitHub on 2026-11-09: github.com's /releases/download/latest/… times out, while the REST API
+    /// lists the release and serves each file as raw bytes (anything else gets the asset's JSON).
+    /// </summary>
+    private static Func<HttpRequestMessage, HttpResponseMessage> GitHub(byte[] zip, int gatewayTimeoutsFirst = 0, bool rateLimited = false)
+    {
+        var timeouts = gatewayTimeoutsFirst;
+        return req =>
+        {
+            var url = req.RequestUri!.AbsoluteUri;
+            var raw = req.Headers.Accept.ToString() == "application/octet-stream";
+            if (url.StartsWith(Gh)) return Answer(HttpStatusCode.GatewayTimeout);
+            if (url == GhApi + "/tags/latest")
+                return rateLimited
+                    ? Answer(HttpStatusCode.Forbidden)
+                    : Answer($$"""{"tag_name":"latest","assets":[{"name":"{{GhZip}}","url":"{{GhApi}}/assets/1"},{"name":"checksums.sha256","url":"{{GhApi}}/assets/2"}]}""");
+            if (url == GhApi + "/assets/1")
+            {
+                if (timeouts-- > 0) return Answer(HttpStatusCode.GatewayTimeout);
+                return raw ? Answer(HttpStatusCode.OK, zip, "https://cdn.test/asset-1") : Answer("""{"id":1}""");
+            }
+            if (url == GhApi + "/assets/2" && raw)
+                return Answer($"{Sha(zip)}  {GhZip}\n{new string('e', 64)}  ffmpeg-master-latest-win32-gpl.zip\n");
+            return Answer(HttpStatusCode.NotFound);
+        };
+    }
+
+    [Fact]
+    public async Task GitHubReleaseFilesComeThroughTheApiAndA504IsRetried()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var server = new Fake(GitHub(BuildZip("ffmpeg-master-latest-win64-gpl"), gatewayTimeoutsFirst: 2));
+        var (tools, paths) = Create(server);
+
+        var info = await tools.InstallFfmpegAsync(CancellationToken.None, WindowsSources());
+
+        Assert.True(info.Ok, info.Note);
+        Assert.Equal("9.9-test", info.Version);
+        Assert.Contains("github.com/acme/ff-builds", info.Note);
+        Assert.Equal(["ffmpeg", "ffprobe"], Directory.GetFileSystemEntries(Path.Combine(paths.Tools, "ffmpeg")).Select(Path.GetFileName).Order());
+        Assert.DoesNotContain(server.Requests, r => r.Contains(Gh));          // the route that times out is never used
+        Assert.DoesNotContain(server.Requests, r => r.Contains("dl.test"));  // nor the fallback
+        Assert.Equal(3, server.Requests.Count(r => r == $"application/octet-stream {GhApi}/assets/1"));
+        Assert.Contains($"application/vnd.github+json {GhApi}/tags/latest", server.Requests);
+    }
+
+    [Fact]
+    public async Task WhenGitHubFailsTheFallbackIsUsed()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var gyanZip = BuildZip("ffmpeg-9.9-essentials_build");
+        var github = GitHub(BuildZip("x"), rateLimited: true);
+        var server = new Fake(req => req.RequestUri!.AbsoluteUri switch
+        {
+            Gyan => Answer(HttpStatusCode.OK, gyanZip, GyanVersioned),
+            GyanVersioned + ".sha256" => Answer(Sha(gyanZip)), // a bare hash, no newline, like gyan.dev
+            _ => github(req),
+        });
+        var (tools, _) = Create(server);
+
+        var info = await tools.InstallFfmpegAsync(CancellationToken.None, WindowsSources());
+
+        Assert.True(info.Ok, info.Note);
+        Assert.Contains("dl.test", info.Note);
+        Assert.Single(server.Requests, r => r.EndsWith(GhApi + "/tags/latest")); // a 403 is not worth retrying
+    }
+
+    [Fact]
+    public async Task WhenEverySourceFailsTheNoteNamesEachAndNothingIsInstalled()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var server = new Fake(req => req.RequestUri!.Host == "dl.test" ? Answer(HttpStatusCode.BadGateway) : GitHub(BuildZip("x"), gatewayTimeoutsFirst: 99)(req));
+        var (tools, paths) = Create(server);
+
+        var info = await tools.InstallFfmpegAsync(CancellationToken.None, WindowsSources());
+
+        Assert.False(info.Ok);
+        Assert.Contains("github.com/acme/ff-builds: api.github.com answered 504 (Gateway Timeout), 3 times.", info.Note);
+        Assert.Contains("dl.test: dl.test answered 502 (Bad Gateway), 3 times.", info.Note);
+        Assert.Contains("retrying in the background", info.Note);
+        Assert.False(Directory.Exists(Path.Combine(paths.Tools, "ffmpeg")));
+        Assert.False(Directory.Exists(Path.Combine(paths.Tools, "ffmpeg.download")));
+    }
+
+    [Fact]
+    public async Task ATamperedFallbackIsRejected()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var server = new Fake(req => req.RequestUri!.AbsoluteUri switch
+        {
+            Gyan => Answer(HttpStatusCode.OK, BuildZip("evil"), GyanVersioned),
+            GyanVersioned + ".sha256" => Answer(new string('0', 64)),
+            _ => Answer(HttpStatusCode.NotFound),
+        });
+        var (tools, paths) = Create(server);
+
+        var info = await tools.InstallFfmpegAsync(CancellationToken.None, WindowsSources());
+
+        Assert.False(info.Ok);
+        Assert.Contains("Checksum mismatch for ffmpeg-release-essentials.zip", info.Note);
+        Assert.False(Directory.Exists(Path.Combine(paths.Tools, "ffmpeg")));
     }
 
     [Fact]

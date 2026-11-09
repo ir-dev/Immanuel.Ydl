@@ -1,6 +1,8 @@
 using System.IO.Compression;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ark.Ydl.Options;
 using Microsoft.Extensions.Options;
@@ -44,6 +46,9 @@ public sealed partial class ToolLocator
 
     public ToolStatus Status { get; private set; }
 
+    /// <summary>Wait before the first retry of a download that failed with a timeout or a 408/429/5xx answer.</summary>
+    internal TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(2);
+
     /// <summary>Completes once the first detection pass (and any bootstrap download) has finished.</summary>
     public Task WhenInitialized => _ready.Task;
 
@@ -78,6 +83,26 @@ public sealed partial class ToolLocator
         {
             _gate.Release();
             _ready.TrySetResult();
+        }
+    }
+
+    /// <summary>
+    /// Looks for ffmpeg again and, if none works, downloads it again. The maintenance service calls this
+    /// while ffmpeg is missing, so one failed download at start-up doesn't last until the next restart.
+    /// </summary>
+    public async Task<ToolInfo> RetryFfmpegAsync(CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var ff = await LocateFfmpegAsync(ct);
+            Status = Status with { Ffmpeg = ff, CheckedAt = DateTimeOffset.UtcNow };
+            if (ff.Ok) _log.LogInformation("ffmpeg {Version} ({Path}) is available now", ff.Version, ff.Path);
+            return ff;
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
@@ -131,7 +156,7 @@ public sealed partial class ToolLocator
                 ? new ToolInfo("yt-dlp", path, v, "Downloaded from the official GitHub release (SHA-256 verified).")
                 : new ToolInfo("yt-dlp", null, null, "Downloaded yt-dlp but it does not run on this machine.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) // HttpClient's timeout is a cancellation too
         {
             _log.LogError(ex, "Could not download yt-dlp");
             return new ToolInfo("yt-dlp", null, null, "Not found and the automatic download failed: " + ex.Message);
@@ -154,8 +179,15 @@ public sealed partial class ToolLocator
         return null;
     }
 
-    /// <summary>Parses a GNU-style SHA2-256SUMS file ("&lt;hex&gt;  [*]&lt;name&gt;").</summary>
-    internal static string? ExpectedHash(string sums, string asset)
+    [GeneratedRegex("^[0-9a-fA-F]{64}$")]
+    private static partial Regex Sha256Rx();
+
+    /// <summary>
+    /// Parses a GNU-style SHA2-256SUMS file ("&lt;hex&gt;  [*]&lt;name&gt;"). With <paramref name="bareHash"/>,
+    /// a file that holds nothing but one hash (gyan.dev's "{file}.sha256") also counts: it can only be
+    /// about the file it sits beside.
+    /// </summary>
+    internal static string? ExpectedHash(string sums, string asset, bool bareHash = false)
     {
         foreach (var raw in sums.Split('\n'))
         {
@@ -165,7 +197,8 @@ public sealed partial class ToolLocator
             var name = line[sp..].Trim().TrimStart('*');
             if (name == asset) return line[..sp].ToLowerInvariant();
         }
-        return null;
+        var only = sums.Trim();
+        return bareHash && Sha256Rx().IsMatch(only) ? only.ToLowerInvariant() : null;
     }
 
     private async Task<string> DownloadYtDlpAsync(CancellationToken ct)
@@ -232,47 +265,69 @@ public sealed partial class ToolLocator
             hasProbe ? note : "ffprobe was not found next to ffmpeg; some post-processing may fail.");
     }
 
-    /// <summary>Downloads this platform's static ffmpeg + ffprobe into {Tools}/ffmpeg and checks that it runs.</summary>
-    internal async Task<ToolInfo> InstallFfmpegAsync(CancellationToken ct)
+    /// <summary>
+    /// Downloads this platform's static ffmpeg + ffprobe into {Tools}/ffmpeg and checks that it runs.
+    /// Each source is tried in turn (default: this platform's own); the note names every one that failed.
+    /// </summary>
+    internal async Task<ToolInfo> InstallFfmpegAsync(CancellationToken ct, IReadOnlyList<FfmpegSource>? sources = null)
     {
         try
         {
-            var (path, source) = await DownloadFfmpegAsync(ct);
-            var info = await FfmpegInfoAsync(path, ct, $"Downloaded a static build from {source} (SHA-256 verified).");
+            var source = await DownloadFfmpegAsync(sources ?? FfmpegSources(_opt.Tools, CurrentOs, RuntimeInformation.OSArchitecture), ct);
+            var info = await FfmpegInfoAsync(OwnedFfmpegPath, ct, $"Downloaded a static build from {source} (SHA-256 verified).");
             return info.Ok ? info : info with { Note = "Downloaded ffmpeg, but " + info.Note };
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _log.LogError(ex, "Could not download ffmpeg");
-            return new ToolInfo("ffmpeg", null, null, "The automatic ffmpeg download failed: " + ex.Message);
+            return new ToolInfo("ffmpeg", null, null,
+                $"The automatic ffmpeg download failed ({ex.Message}). The app keeps retrying in the background; " +
+                "to use an ffmpeg you installed yourself, set Ydl:Tools:FfmpegPath.");
         }
     }
 
     /// <summary>One file to download: its URL, the checksum file that lists it (null = "{URL after redirects}.sha256"), and the name it is listed under.</summary>
     internal sealed record ToolArchive(string Url, string? SumsUrl, string Name);
 
+    /// <summary>One place to get ffmpeg + ffprobe from: a short label for messages, and the archives that together hold both.</summary>
+    internal sealed record FfmpegSource(string Label, IReadOnlyList<ToolArchive> Archives);
+
     /// <summary>
-    /// Where this platform's static ffmpeg + ffprobe come from. macOS and Linux use ffmpeg.martin-riedl.de,
-    /// which has one self-contained zip per tool with a .sha256 file beside it ("latest" redirects to a
-    /// versioned folder). Windows uses yt-dlp's FFmpeg-Builds: one zip, listed in checksums.sha256.
-    /// Returns null when neither source has a build for the platform.
+    /// Where this platform's static ffmpeg + ffprobe come from, in the order to try them. macOS and Linux
+    /// use ffmpeg.martin-riedl.de, which has one self-contained zip per tool with a .sha256 file beside it
+    /// ("latest" redirects to a versioned folder). Windows uses yt-dlp's FFmpeg-Builds (one zip, listed
+    /// in checksums.sha256), then on x64 gyan.dev (one zip, bare .sha256 beside it). Empty when there is
+    /// no build for the platform.
     /// </summary>
-    internal static IReadOnlyList<ToolArchive>? FfmpegArchives(ToolOptions o, OSPlatform os, Architecture arch)
+    internal static IReadOnlyList<FfmpegSource> FfmpegSources(ToolOptions o, OSPlatform os, Architecture arch)
     {
         if (os == OSPlatform.Windows)
         {
+            var list = new List<FfmpegSource>();
             var flavor = arch switch { Architecture.X64 => "win64", Architecture.Arm64 => "winarm64", Architecture.X86 => "win32", _ => null };
-            if (flavor is null) return null;
-            var b = o.FfmpegWindowsReleaseBase.TrimEnd('/') + "/";
-            var zip = $"ffmpeg-master-latest-{flavor}-gpl.zip";
-            return [new ToolArchive(b + zip, b + "checksums.sha256", zip)];
+            if (flavor is not null && !string.IsNullOrWhiteSpace(o.FfmpegWindowsReleaseBase))
+            {
+                var b = o.FfmpegWindowsReleaseBase.Trim().TrimEnd('/') + "/";
+                var zip = $"ffmpeg-master-latest-{flavor}-gpl.zip";
+                list.Add(new FfmpegSource(SourceLabel(b + zip), [new ToolArchive(b + zip, b + "checksums.sha256", zip)]));
+            }
+            if (arch == Architecture.X64 && !string.IsNullOrWhiteSpace(o.FfmpegWindowsFallbackUrl))
+            {
+                var url = o.FfmpegWindowsFallbackUrl.Trim();
+                list.Add(new FfmpegSource(SourceLabel(url), [new ToolArchive(url, null, Path.GetFileName(new Uri(url).AbsolutePath))]));
+            }
+            return list;
         }
         var system = os == OSPlatform.OSX ? "macos" : os == OSPlatform.Linux ? "linux" : null;
         var cpu = arch switch { Architecture.X64 => "amd64", Architecture.Arm64 => "arm64", _ => null };
-        if (system is null || cpu is null) return null;
+        if (system is null || cpu is null) return [];
         var root = $"{o.FfmpegReleaseBase.TrimEnd('/')}/{system}/{cpu}/release/";
-        return [new ToolArchive(root + "ffmpeg.zip", null, "ffmpeg.zip"), new ToolArchive(root + "ffprobe.zip", null, "ffprobe.zip")];
+        return [new FfmpegSource(SourceLabel(root), [new ToolArchive(root + "ffmpeg.zip", null, "ffmpeg.zip"), new ToolArchive(root + "ffprobe.zip", null, "ffprobe.zip")])];
     }
+
+    /// <summary>"github.com/{owner}/{repo}" for a GitHub release file, else the host.</summary>
+    private static string SourceLabel(string url) =>
+        GitHubReleaseFile(url) is { } g ? $"github.com/{g.Owner}/{g.Repo}" : new Uri(url).Host;
 
     private static OSPlatform CurrentOs =>
         IsWindows ? OSPlatform.Windows
@@ -280,11 +335,32 @@ public sealed partial class ToolLocator
         : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? OSPlatform.Linux
         : OSPlatform.FreeBSD;
 
-    private async Task<(string Path, string Source)> DownloadFfmpegAsync(CancellationToken ct)
+    /// <summary>Installs from the first source that works and returns its label; throws with every source's reason if none does.</summary>
+    private async Task<string> DownloadFfmpegAsync(IReadOnlyList<FfmpegSource> sources, CancellationToken ct)
     {
-        var archives = FfmpegArchives(_opt.Tools, CurrentOs, RuntimeInformation.OSArchitecture)
-                       ?? throw new PlatformNotSupportedException($"No static ffmpeg build is published for {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}).");
+        if (sources.Count == 0)
+            throw new PlatformNotSupportedException($"No static ffmpeg build is published for {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture}).");
         var client = _http.CreateClient("tools");
+        var failures = new List<string>();
+        foreach (var s in sources)
+        {
+            try
+            {
+                await InstallFromAsync(client, s, ct);
+                return s.Label;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _log.LogWarning(ex, "ffmpeg download from {Source} failed", s.Label);
+                failures.Add($"{s.Label}: {ex.Message}");
+            }
+        }
+        throw new InvalidOperationException(string.Join("; ", failures));
+    }
+
+    private async Task InstallFromAsync(HttpClient client, FfmpegSource source, CancellationToken ct)
+    {
+        var archives = await ViaGitHubApiAsync(client, source.Archives, ct);
         string[] wanted = [Exe("ffmpeg"), Exe("ffprobe")];
 
         // Build the folder under a temporary name and move it in at the end, so the app never
@@ -296,7 +372,7 @@ public sealed partial class ToolLocator
         {
             foreach (var a in archives)
             {
-                _log.LogInformation("Downloading ffmpeg: {Url}", a.Url);
+                _log.LogInformation("Downloading ffmpeg from {Source}: {Url}", source.Label, a.Url);
                 var zip = Path.Combine(staging, "archive.zip");
                 var sha = await DownloadVerifiedAsync(client, a, zip, ct);
                 ExtractNamed(zip, staging, wanted);
@@ -331,7 +407,57 @@ public sealed partial class ToolLocator
             throw;
         }
         _log.LogInformation("ffmpeg saved to {Dir}", OwnedFfmpegDir);
-        return (OwnedFfmpegPath, new Uri(archives[0].Url).Host);
+    }
+
+    // ── GitHub release files ────────────────────────────────────────────────
+
+    internal sealed record GitHubFile(string Owner, string Repo, string Tag, string Name)
+    {
+        public string ReleaseApiUrl => $"https://api.github.com/repos/{Owner}/{Repo}/releases/tags/{Tag}";
+    }
+
+    [GeneratedRegex(@"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex GitHubFileRx();
+
+    /// <summary>"https://github.com/{owner}/{repo}/releases/download/{tag}/{file}" → its parts; anything else → null.</summary>
+    internal static GitHubFile? GitHubReleaseFile(string? url) =>
+        url is not null && GitHubFileRx().Match(url) is { Success: true } m
+            ? new GitHubFile(m.Groups[1].Value, m.Groups[2].Value, Uri.UnescapeDataString(m.Groups[3].Value), Uri.UnescapeDataString(m.Groups[4].Value))
+            : null;
+
+    /// <summary>
+    /// Swaps each github.com release download URL for the same file's REST API URL. Since 2026-11-09 github.com
+    /// answers /releases/download/latest/… for yt-dlp/FFmpeg-Builds (thousands of daily releases) with 504
+    /// Gateway Time-out, while the API serves the same release. That costs one API call per release; the
+    /// files themselves still come from GitHub's download CDN.
+    /// </summary>
+    private async Task<IReadOnlyList<ToolArchive>> ViaGitHubApiAsync(HttpClient client, IReadOnlyList<ToolArchive> archives, CancellationToken ct)
+    {
+        var releases = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        async Task<string?> ApiUrl(string? url)
+        {
+            if (GitHubReleaseFile(url) is not { } f) return url;
+            if (!releases.TryGetValue(f.ReleaseApiUrl, out var assets))
+            {
+                using var resp = await GetAsync(client, f.ReleaseApiUrl, ct, "application/vnd.github+json");
+                await using var body = await resp.Content.ReadAsStreamAsync(ct);
+                using var doc = await JsonDocument.ParseAsync(body, cancellationToken: ct);
+                assets = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var a in doc.RootElement.GetProperty("assets").EnumerateArray())
+                    if (a.GetProperty("name").GetString() is { } n && a.GetProperty("url").GetString() is { } u)
+                        assets[n] = u;
+                releases[f.ReleaseApiUrl] = assets;
+            }
+            return assets.TryGetValue(f.Name, out var api)
+                ? api
+                : throw new InvalidOperationException($"{f.Name} is not in the {f.Owner}/{f.Repo} release \"{f.Tag}\".");
+        }
+
+        var resolved = new List<ToolArchive>();
+        foreach (var a in archives)
+            resolved.Add(a with { Url = (await ApiUrl(a.Url))!, SumsUrl = await ApiUrl(a.SumsUrl) });
+        return resolved;
     }
 
     /// <summary>
@@ -392,13 +518,12 @@ public sealed partial class ToolLocator
     /// Streams <paramref name="a"/> to <paramref name="dest"/> and checks its SHA-256 against the
     /// published checksum file. Returns the hash.
     /// </summary>
-    private static async Task<string> DownloadVerifiedAsync(HttpClient client, ToolArchive a, string dest, CancellationToken ct)
+    private async Task<string> DownloadVerifiedAsync(HttpClient client, ToolArchive a, string dest, CancellationToken ct)
     {
         string actual;
         Uri final;
-        using (var resp = await client.GetAsync(a.Url, HttpCompletionOption.ResponseHeadersRead, ct))
+        using (var resp = await GetAsync(client, a.Url, ct))
         {
-            resp.EnsureSuccessStatusCode();
             final = resp.RequestMessage?.RequestUri ?? new Uri(a.Url);
             await using var src = await resp.Content.ReadAsStreamAsync(ct);
             await using var dst = File.Create(dest);
@@ -414,13 +539,57 @@ public sealed partial class ToolLocator
         }
 
         // A "latest" link redirects to a versioned file, and that file's .sha256 sits next to it.
-        var sums = await client.GetStringAsync(a.SumsUrl ?? final.AbsoluteUri + ".sha256", ct);
-        var expected = ExpectedHash(sums, a.Name);
+        string sums;
+        using (var resp = await GetAsync(client, a.SumsUrl ?? final.AbsoluteUri + ".sha256", ct))
+            sums = await resp.Content.ReadAsStringAsync(ct);
+        var expected = ExpectedHash(sums, a.Name, bareHash: a.SumsUrl is null);
         if (expected == actual) return expected;
         File.Delete(dest);
         throw new InvalidOperationException(expected is null
             ? $"{a.Name} is not listed in its checksum file."
             : $"Checksum mismatch for {a.Name}: expected {expected}, got {actual}.");
+    }
+
+    private const int Attempts = 3;
+
+    private static bool IsTransient(HttpStatusCode s) =>
+        s is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout;
+
+    /// <summary>
+    /// GET that returns a successful response (headers read, body still to come) or throws. A timeout, a
+    /// dropped connection or a 408/429/5xx gateway answer is tried again, up to <see cref="Attempts"/> times.
+    /// A GitHub REST API file is asked for as raw bytes, which redirects to the download CDN.
+    /// </summary>
+    private async Task<HttpResponseMessage> GetAsync(HttpClient client, string url, CancellationToken ct, string? accept = null)
+    {
+        accept ??= url.StartsWith("https://api.github.com/", StringComparison.OrdinalIgnoreCase) ? "application/octet-stream" : null;
+        for (var attempt = 1; ; attempt++)
+        {
+            var delay = RetryDelay * (attempt == 1 ? 1 : 3);
+            HttpResponseMessage resp;
+            try
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (accept is not null) req.Headers.Accept.ParseAdd(accept);
+                resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            }
+            catch (Exception ex) when (attempt < Attempts && !ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
+            {
+                _log.LogWarning("GET {Url} failed ({Reason}); trying again in {Delay}", url, ex.Message, delay);
+                await Task.Delay(delay, ct);
+                continue;
+            }
+            if (resp.IsSuccessStatusCode) return resp;
+
+            var (status, reason) = (resp.StatusCode, resp.ReasonPhrase);
+            resp.Dispose();
+            var answer = $"{new Uri(url).Host} answered {(int)status} ({reason})";
+            if (attempt >= Attempts || !IsTransient(status))
+                throw new HttpRequestException(attempt > 1 ? $"{answer}, {attempt} times." : answer + ".", null, status);
+            _log.LogWarning("GET {Url}: {Answer}; trying again in {Delay}", url, answer, delay);
+            await Task.Delay(delay, ct);
+        }
     }
 
     private static void MakeExecutable(string path)
@@ -497,27 +666,63 @@ public sealed partial class ToolLocator
     }
 }
 
-/// <summary>Detects tools at start-up (without blocking it) and keeps yt-dlp updated.</summary>
+/// <summary>
+/// Detects tools at start-up (without blocking it), keeps yt-dlp updated, and while ffmpeg is missing
+/// tries its download again: 10 minutes after a failure, then twice as long each time, up to 6 hours.
+/// </summary>
 public sealed class ToolMaintenanceService(ToolLocator tools, IOptions<YdlOptions> opt, ILogger<ToolMaintenanceService> log) : BackgroundService
 {
+    internal static readonly TimeSpan FfmpegRetryFirst = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan FfmpegRetryMax = TimeSpan.FromHours(6);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await tools.InitializeAsync(stoppingToken);
         var o = opt.Value.Tools;
-        if (!o.AutoUpdateYtDlp) return;
-
         var interval = TimeSpan.FromHours(Math.Max(1, o.UpdateIntervalHours));
+        var nextUpdate = o.AutoUpdateYtDlp ? DateTimeOffset.UtcNow : DateTimeOffset.MaxValue;
+        var ffmpegWait = FfmpegRetryFirst;
+        var nextFfmpeg = DateTimeOffset.UtcNow + ffmpegWait;
+
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            if (DateTimeOffset.UtcNow >= nextUpdate)
             {
-                if (tools.OwnsYtDlp) await tools.UpdateYtDlpAsync(stoppingToken);
+                try
+                {
+                    if (tools.OwnsYtDlp) await tools.UpdateYtDlpAsync(stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    log.LogWarning(ex, "yt-dlp self-update failed; will retry in {Interval}", interval);
+                }
+                nextUpdate = DateTimeOffset.UtcNow + interval;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            var ffmpegMissing = o.AutoDownloadFfmpeg && !tools.Status.Ffmpeg.Ok;
+            if (ffmpegMissing && DateTimeOffset.UtcNow >= nextFfmpeg)
             {
-                log.LogWarning(ex, "yt-dlp self-update failed; will retry in {Interval}", interval);
+                log.LogInformation("ffmpeg is still missing; trying the download again");
+                try
+                {
+                    ffmpegMissing = !(await tools.RetryFfmpegAsync(stoppingToken)).Ok;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    log.LogWarning(ex, "ffmpeg retry failed");
+                }
+                if (ffmpegMissing)
+                {
+                    ffmpegWait = TimeSpan.FromTicks(Math.Min(ffmpegWait.Ticks * 2, FfmpegRetryMax.Ticks));
+                    log.LogWarning("ffmpeg is still missing; next try in {Wait}", ffmpegWait);
+                }
+                nextFfmpeg = DateTimeOffset.UtcNow + ffmpegWait;
             }
-            await Task.Delay(interval, stoppingToken);
+
+            var next = ffmpegMissing && nextFfmpeg < nextUpdate ? nextFfmpeg : nextUpdate;
+            if (next == DateTimeOffset.MaxValue) return; // nothing left to do
+            var wait = next - DateTimeOffset.UtcNow;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, stoppingToken);
         }
     }
 }

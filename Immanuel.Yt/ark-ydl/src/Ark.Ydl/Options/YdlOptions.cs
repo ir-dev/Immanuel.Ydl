@@ -89,8 +89,18 @@ public sealed class ToolOptions
     /// <summary>macOS / Linux static builds: {base}{macos|linux}/{amd64|arm64}/release/{ffmpeg,ffprobe}.zip, each with a .sha256.</summary>
     public string FfmpegReleaseBase { get; set; } = "https://ffmpeg.martin-riedl.de/redirect/latest/";
 
-    /// <summary>Windows static builds (yt-dlp/FFmpeg-Builds): ffmpeg-master-latest-{win64|winarm64|win32}-gpl.zip + checksums.sha256.</summary>
-    public string FfmpegWindowsReleaseBase { get; set; } = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/";
+    /// <summary>
+    /// Windows static builds (yt-dlp/FFmpeg-Builds): ffmpeg-master-latest-{win64|winarm64|win32}-gpl.zip + checksums.sha256.
+    /// A github.com/{owner}/{repo}/releases/download/{tag}/ base is fetched through the GitHub REST API instead,
+    /// because github.com answers that route with 504 for this repo. Empty = skip this source.
+    /// </summary>
+    public string? FfmpegWindowsReleaseBase { get; set; } = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/";
+
+    /// <summary>
+    /// Tried on Windows x64 when the source above fails: a zip holding ffmpeg.exe + ffprobe.exe, with the
+    /// .sha256 beside the file it redirects to (gyan.dev, linked from ffmpeg.org). Empty = no fallback.
+    /// </summary>
+    public string? FfmpegWindowsFallbackUrl { get; set; } = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
 
     /// <summary>auto | deno | node | bun | quickjs | none. YouTube needs one since yt-dlp 2025.11.</summary>
     public string JsRuntime { get; set; } = "auto";
