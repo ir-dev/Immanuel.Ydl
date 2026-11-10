@@ -5,6 +5,22 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "ark-feedback (http)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "ark-feedback: build",
+      "program": "${workspaceFolder}/Immanuel.Yt/ark-feedback/src/Ark.Feedback/bin/Debug/net10.0/Ark.Feedback.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/Immanuel.Yt/ark-feedback/src/Ark.Feedback",
+      "launchSettingsProfile": "http",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    },
+    {
       "name": "ark-ydl (http)",
       "type": "coreclr",
       "request": "launch",

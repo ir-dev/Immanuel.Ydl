@@ -1,0 +1,47 @@
+{
+  // F5 = "ark-feedback (http)". Builds src/Ark.Feedback, starts it with the matching profile from
+  // Properties/launchSettings.json (URL + ASPNETCORE_ENVIRONMENT=Development), opens the browser.
+  // Needs the C# extension (ms-dotnettools.csharp). Runtime data (models, yt-dlp, reports, audit
+  // databases) lands in src/Ark.Feedback/App_Data; a fresh checkout downloads ~850 MB on first start.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ark-feedback (http)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "ark-feedback: build",
+      "program": "${workspaceFolder}/src/Ark.Feedback/bin/Debug/net10.0/Ark.Feedback.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Ark.Feedback",
+      "launchSettingsProfile": "http",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    },
+    {
+      // Needs a trusted dev certificate once per machine: dotnet dev-certs https --trust
+      "name": "ark-feedback (https)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "ark-feedback: build",
+      "program": "${workspaceFolder}/src/Ark.Feedback/bin/Debug/net10.0/Ark.Feedback.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/Ark.Feedback",
+      "launchSettingsProfile": "https",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    },
+    {
+      "name": "ark-feedback (attach)",
+      "type": "coreclr",
+      "request": "attach"
+    }
+  ]
+}

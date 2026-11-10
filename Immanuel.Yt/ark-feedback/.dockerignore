@@ -1,0 +1,15 @@
+# az acr build / docker build upload filter. NOTE: .gitignore is NOT consulted by "az acr build".
+**/bin/
+**/obj/
+**/App_Data/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/*.user
+**/TestResults/
+tests/
+.git/
+.gitignore
+.dockerignore
+*.md
+az_deploy.txt

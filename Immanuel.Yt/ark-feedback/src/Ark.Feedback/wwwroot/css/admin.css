@@ -1,0 +1,48 @@
+/* Admin console: dense, tabular, same tokens as the app. */
+.admin-main { padding-bottom: 40px; }
+.signin { max-width: 440px; margin: 48px auto; }
+.signin h1 { font-size: 22px; margin-bottom: 6px; }
+.key-form { display: flex; gap: 8px; margin-top: 14px; }
+.key-form input { flex: 1; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 9px 12px; background: var(--surface); }
+.filter-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 16px 0; }
+.range-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.range-presets { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.range-presets button { border: 0; border-radius: 0; padding: 6px 10px; font-size: 13px; background: transparent; }
+.range-presets button.is-on { background: var(--accent-soft); color: var(--accent-text); font-weight: 700; }
+.range-custom { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.range-custom input { border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; background: var(--surface); font-size: 13px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.kpi .label { font-size: 12px; color: var(--muted); }
+.kpi .value { font-size: 24px; font-weight: 700; margin-top: 2px; }
+.kpi .delta { font-size: 12px; color: var(--muted); }
+.kpi .delta.up { color: var(--ok); } .kpi .delta.down { color: var(--err); }
+.admin .card { margin-bottom: 16px; }
+.admin .grid.two .card { margin-bottom: 0; }
+.admin .grid { margin-bottom: 16px; }
+.log-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.log-filters input, .log-filters select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--surface); font-size: 13.5px; }
+.log-filters input[type="search"] { flex: 1 1 220px; }
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.pager .btns { display: flex; gap: 6px; }
+table.data td.clip { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.data tr.row-link { cursor: pointer; }
+.detail { position: fixed; inset: 0; background: rgb(0 0 0 / 45%); z-index: 40; display: grid; place-items: center; padding: 16px; }
+.detail .panel { background: var(--surface); border-radius: var(--radius); max-width: 980px; width: 100%; max-height: 92vh; overflow: auto; padding: 20px; box-shadow: var(--shadow-lg); }
+.detail .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 16px; font-size: 13.5px; }
+.kv div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--border); padding: 3px 0; }
+.kv span:first-child { color: var(--muted); }
+.kv span:last-child { text-align: right; word-break: break-word; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.status-list { display: grid; gap: 8px; }
+.status-list .item { display: grid; grid-template-columns: 1fr auto; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); font-size: 13.5px; }
+.status-list .item b { display: block; }
+.state { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--muted); white-space: nowrap; }
+.state.ready, .state.ok { background: var(--ok-soft); color: var(--ok); }
+.state.downloading, .state.starting, .state.warn { background: var(--warn-soft); color: var(--warn); }
+.state.failed, .state.missing, .state.unavailable, .state.err { background: var(--err-soft); color: var(--err); }
+.month { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; }
+.month-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.month-head b { font-size: 15px; }
+@media (max-width: 720px) { .detail .panel { padding: 14px; } .kv { grid-template-columns: 1fr; } }

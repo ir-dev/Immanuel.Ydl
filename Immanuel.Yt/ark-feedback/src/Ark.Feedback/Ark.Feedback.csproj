@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Ark.Feedback</RootNamespace>
+    <AssemblyName>Ark.Feedback</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>ark-feedback</Product>
+    <Description>Paste a YouTube link and get a multilingual sentiment report of its comments, computed on the CPU with open-source models.</Description>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Optional sign-in against the Ark identity server; only wired when ark_oauth_client is configured. -->
+    <PackageReference Include="Ark.oAuth.Client" Version="2.1.7" />
+    <!-- Audit log: one SQLite file per month, written through Ark.Rapid.Database (it also brings the MariaDB/Postgres drivers). -->
+    <PackageReference Include="Ark.Rapid.Database" Version="0.0.23" />
+    <!-- Ark.Rapid.Database 0.0.23 brings MySqlConnector 2.4.0 (GHSA-473q-m89c-ghf8, fixed in 2.6.1). Unused here, but it ships, so pin the fix. -->
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <!-- Reads the DB-IP lite .mmdb that turns an IP into a country for the audit log. -->
+    <PackageReference Include="MaxMind.Db" Version="5.2.0" />
+    <!-- CPU inference of the ONNX text models (sentiment, toxicity, emotion, embeddings). -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
+    <!-- SentencePiece (XLM-R family) tokenization; WordPiece (BERT family) is implemented in Nlp/WordPieceTokenizer.cs. -->
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
+    <!-- fastText lid.176 language identification (176 languages, ~1 MB model bundled in the package). -->
+    <PackageReference Include="Panlingo.LanguageIdentification.FastText" Version="0.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ark.Feedback.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Runtime data (models, yt-dlp, reports, audit databases) never ships. -->
+    <Content Remove="App_Data\**" />
+    <None Remove="App_Data\**" />
+  </ItemGroup>
+
+</Project>

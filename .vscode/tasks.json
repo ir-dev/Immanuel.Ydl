@@ -2,6 +2,27 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "ark-feedback: build",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/Immanuel.Yt/ark-feedback/src/Ark.Feedback/Ark.Feedback.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary;ForceNoAlign"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    },
+    {
+      "label": "ark-feedback: test",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "${workspaceFolder}/Immanuel.Yt/ark-feedback/ark-feedback.sln"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    },
+    {
       "label": "ark-ydl: build",
       "type": "process",
       "command": "dotnet",

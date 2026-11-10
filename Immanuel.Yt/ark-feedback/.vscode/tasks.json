@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ark-feedback: build",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/src/Ark.Feedback/Ark.Feedback.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary;ForceNoAlign"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "ark-feedback: test",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "${workspaceFolder}/ark-feedback.sln"],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "ark-feedback: watch",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "watch",
+        "run",
+        "--project",
+        "${workspaceFolder}/src/Ark.Feedback/Ark.Feedback.csproj",
+        "--launch-profile",
+        "http"
+      ],
+      "isBackground": true,
+      "problemMatcher": "$msCompile"
+    },
+    {
+      // Windows IIS (see README "Deploy"): framework-dependent win-x64; the app pool must be 64-bit.
+      "label": "ark-feedback: publish for IIS (win-x64)",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "publish",
+        "${workspaceFolder}/src/Ark.Feedback/Ark.Feedback.csproj",
+        "-c",
+        "Release",
+        "-r",
+        "win-x64",
+        "--self-contained",
+        "false",
+        "-o",
+        "${workspaceFolder}/src/Ark.Feedback/bin/publish/iis",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary;ForceNoAlign"
+      ],
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

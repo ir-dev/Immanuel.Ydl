@@ -1,0 +1,13 @@
+bin/
+obj/
+App_Data/
+.vs/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.user
+TestResults/
+
+# Production overrides hold secrets (Feedback:Admin:Key, YouTube:ApiKey) - never commit
+appsettings.Production.json

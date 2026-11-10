@@ -1,0 +1,82 @@
+@{
+    Layout = null;
+    var appName = (string?)ViewData["AppName"] ?? "ARK-RAPID";
+}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@appName · Admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#081525" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/admin.css">
+  <script type="module" src="/js/admin.js"></script>
+</head>
+<body class="admin">
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="/" aria-label="@appName, home">
+        <svg class="brand-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+        <span class="brand-text" aria-hidden="true">
+          <svg class="brand-word"><use href="/img/mark.svg#wordmark" width="100%" height="100%"/></svg>
+          <span class="brand-tag">Admin console</span>
+        </span>
+      </a>
+      <nav class="topbar-actions">
+        <span id="who" class="pill" hidden></span>
+        <button id="btn-theme" class="icon-btn" type="button" aria-label="Switch theme" title="Theme"><span data-icon="theme"></span></button>
+        <button id="btn-signout" class="ghost small" type="button" hidden>Sign out</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap admin-main">
+    <section id="signin" class="card signin" hidden>
+      <h1>Admin console</h1>
+      <p class="muted" id="signin-note">Enter the admin key to continue.</p>
+      <form id="key-form" class="key-form" autocomplete="off">
+        <input id="key" type="password" autocomplete="current-password" placeholder="Admin key" aria-label="Admin key">
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+      <p id="signin-error" class="err-text" hidden></p>
+    </section>
+
+    <div id="console" hidden>
+      <div class="filter-row">
+        <nav class="tabs" role="tablist" aria-label="Sections">
+          <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+          <button role="tab" data-tab="analyses">Analyses</button>
+          <button role="tab" data-tab="feedback">Feedback</button>
+          <button role="tab" data-tab="requests">Requests</button>
+          <button role="tab" data-tab="store">Storage</button>
+          <button role="tab" data-tab="system">System</button>
+        </nav>
+        <div class="range-row" id="range-row">
+          <div class="range-presets" role="group" aria-label="Date range">
+            <button data-days="1">Today</button>
+            <button data-days="7">7 days</button>
+            <button data-days="30" class="is-on">30 days</button>
+            <button data-days="90">90 days</button>
+            <button data-days="mtd">Month to date</button>
+          </div>
+          <label class="range-custom">From <input id="from" type="date"></label>
+          <label class="range-custom">To <input id="to" type="date"></label>
+        </div>
+      </div>
+      <section id="tab-overview" class="tab" role="tabpanel"></section>
+      <section id="tab-analyses" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-feedback" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-requests" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-store" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-system" class="tab" role="tabpanel" hidden></section>
+    </div>
+  </main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

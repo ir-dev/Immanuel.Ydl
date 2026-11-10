@@ -1,0 +1,104 @@
+@{
+    Layout = null;
+    var appName = (string?)ViewData["AppName"] ?? "ARK-RAPID";
+    var title = (string?)ViewData["Title"] ?? appName;
+    var description = (string?)ViewData["Description"] ?? "";
+    var image = (string?)ViewData["Image"];
+    var reportId = (string?)ViewData["ReportId"];
+}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>@title</title>
+  <meta name="description" content="@description">
+  <meta property="og:title" content="@title">
+  <meta property="og:description" content="@description">
+  @if (image is not null) { <meta property="og:image" content="@image"> }
+  <meta name="application-name" content="@appName">
+  <meta name="apple-mobile-web-app-title" content="@appName">
+  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#081525" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body data-report="@reportId">
+  <a class="skip" href="#url">Skip to the link box</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="/" aria-label="@appName comment sentiment, home">
+        <svg class="brand-mark" aria-hidden="true"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+        <span class="brand-text" aria-hidden="true">
+          <svg class="brand-word"><use href="/img/mark.svg#wordmark" width="100%" height="100%"/></svg>
+          <span class="brand-tag">Comment sentiment</span>
+        </span>
+      </a>
+      <nav class="topbar-actions" aria-label="Page actions">
+        <span id="sys-pill" class="pill" hidden></span>
+        <a id="nav-recent" class="ghost small" href="/#recent" hidden>Recent</a>
+        <button id="btn-theme" class="icon-btn" type="button" aria-label="Switch theme" title="Theme"><span data-icon="theme"></span></button>
+        <form id="user-box" class="user-box" method="post" action="/auth/signout" hidden>
+          <span id="user-name"></span>
+          <button class="ghost small" type="submit">Sign out</button>
+        </form>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap" id="main">
+    <section class="hero" id="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <svg class="mark"><use href="/img/mark.svg#mark" width="100%" height="100%"/></svg>
+      </div>
+      <h1>What do the comments <span class="grad">really say</span>?</h1>
+      <p class="sub">Paste a YouTube link. Open-source language models read the comments on this server's CPU and report the sentiment, the languages, the themes and the voices that matter.</p>
+
+      <form id="url-form" class="url-form" autocomplete="off" novalidate>
+        <label class="url-box" for="url">
+          <span class="url-icon" data-icon="link" aria-hidden="true"></span>
+          <input id="url" name="url" type="text" inputmode="url" enterkeyhint="go"
+                 placeholder="Paste a YouTube link — video, Short or live replay"
+                 aria-label="YouTube link" spellcheck="false" autocapitalize="off">
+          <button type="button" id="btn-clear" class="icon-btn small" aria-label="Clear" hidden><span data-icon="x"></span></button>
+          <button type="button" id="btn-paste" class="ghost small paste-btn"><span data-icon="paste"></span><span>Paste</span></button>
+        </label>
+        <button type="submit" class="primary go-btn" id="btn-go"><span>Analyse</span><span data-icon="arrow"></span></button>
+      </form>
+      <div class="profile-row" id="profile-row" role="radiogroup" aria-label="How deep to analyse"></div>
+
+      <div id="sys-banner" class="banner warn" role="status" hidden></div>
+      <div id="error-banner" class="banner err" role="alert" hidden></div>
+
+      <ul class="hint-chips" aria-label="What the report covers">
+        <li><span data-icon="smile"></span>Positive · neutral · negative</li>
+        <li><span data-icon="globe"></span>100+ languages</li>
+        <li><span data-icon="layers"></span>Themes &amp; repeats</li>
+        <li><span data-icon="clock"></span>Mood over time</li>
+        <li><span data-icon="shield"></span>Toxicity &amp; emotions</li>
+        <li><span data-icon="cpu"></span>Runs on the CPU, no cloud AI</li>
+      </ul>
+    </section>
+
+    <section id="progress" class="card progress" aria-live="polite" hidden></section>
+    <section id="report" aria-live="polite"></section>
+    <section id="recent" class="recent" hidden>
+      <h2>Recently analysed</h2>
+      <div id="recent-list" class="recent-list"></div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <p class="faint">Sentiment, toxicity and emotions come from open models (XLM-T, DistilBERT, MiniLM, fastText) running on this server. Nothing is sent to a cloud AI. Comments are public YouTube data; the report is a reading of them, not a judgement of the people who wrote them.</p>
+    <p class="faint" id="foot-version"></p>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
