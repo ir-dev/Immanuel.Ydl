@@ -11,3 +11,5 @@ TestResults/
 
 # Production overrides hold secrets (Feedback:Admin:Key, YouTube:ApiKey) - never commit
 appsettings.Production.json
+
+.DS_Store

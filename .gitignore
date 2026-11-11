@@ -3,3 +3,4 @@
 *.dll
 *.mp3
 .cc-history/
+.DS_Store
