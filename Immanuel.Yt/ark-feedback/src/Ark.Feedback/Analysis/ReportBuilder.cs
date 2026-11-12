@@ -65,7 +65,15 @@ public static class ReportBuilder
             Comments = comments,
         };
         report.Insights.AddRange(Insights(report));
+        Enrich(report);
         return report;
+    }
+
+    /// <summary>Adds the audience profile and the narrative summary. Also run on load for reports written before schema 2.</summary>
+    public static void Enrich(Report r)
+    {
+        r.Audience ??= AudienceProfiler.Profile(r.Video, r.Comments, r.Sentiment, r.Toxicity, r.Languages, r.Highlights, r.Threads);
+        r.Summary ??= AudienceProfiler.Summary(r);
     }
 
     // ── sentiment ──────────────────────────────────────────────────────────

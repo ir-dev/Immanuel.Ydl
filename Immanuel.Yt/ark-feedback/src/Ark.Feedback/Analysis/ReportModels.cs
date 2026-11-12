@@ -174,7 +174,7 @@ public sealed class ComputeSummary
 /// <summary>The report: everything the page draws and everything the audit log summarises.</summary>
 public sealed class Report
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     public required string Id { get; init; }
     public int Schema { get; init; } = SchemaVersion;
@@ -197,6 +197,10 @@ public sealed class Report
     public Engagement Engagement { get; init; } = new();
     public Dictionary<string, List<string>> Highlights { get; init; } = new();
     public List<Insight> Insights { get; init; } = [];
+    /// <summary>Genre, geographic reach, age group and the parents' and teachers' guide (schema 2; filled in on load for older reports).</summary>
+    public Audience? Audience { get; set; }
+    /// <summary>A few plain sentences that sum the whole report up.</summary>
+    public string? Summary { get; set; }
     public List<ModelUse> Models { get; init; } = [];
     public ComputeSummary Compute { get; init; } = new();
     public List<ScoredComment> Comments { get; init; } = [];
@@ -216,4 +220,11 @@ public sealed class ReportMeta
     public double Score { get; init; }
     public required string Verdict { get; init; }
     public string? PrimaryLanguage { get; init; }
+    public string? Genre { get; init; }
+    public string? GenreIcon { get; init; }
+    public string? AgeGroup { get; init; }
+    public string? AgeRange { get; init; }
+    public string? Reach { get; init; }
+    /// <summary>green | amber | red | unknown.</summary>
+    public string? Family { get; init; }
 }

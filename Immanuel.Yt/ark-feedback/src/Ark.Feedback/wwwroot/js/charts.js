@@ -200,6 +200,28 @@ export function rankedBars(parent, rows, { max = 12, color = 'var(--accent)', fo
   return box;
 }
 
+/** Five age bands as columns (share of the audience, 0..100), the leading band in the accent colour, the rest in a muted tint. */
+export function ageBands(parent, bands, primary) {
+  const W = 360, H = 150, L = 8, R = 8, T = 22, B = 34;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart age-chart', role: 'img', 'aria-label': 'Estimated share of the audience by age band' }, parent);
+  const pw = W - L - R, ph = H - T - B;
+  const n = bands.length;
+  const slot = pw / Math.max(1, n);
+  const bw = Math.min(56, slot * 0.62);
+  const max = Math.max(1, ...bands.map((b) => b.pct));
+  el('line', { x1: L, x2: W - R, y1: T + ph, y2: T + ph, class: 'axis' }, svg);
+  bands.forEach((b, i) => {
+    const x = L + slot * i + (slot - bw) / 2;
+    const h = (ph * b.pct) / max;
+    const r = el('rect', { x, y: T + ph - h, width: bw, height: Math.max(0, h), rx: 4, class: b.key === primary ? 'lead' : 'rest' }, svg);
+    text(svg, x + bw / 2, T + ph - h - 6, `${Math.round(b.pct)}%`, b.key === primary ? 'val' : '', 'middle');
+    text(svg, x + bw / 2, H - 20, b.range, '', 'middle');
+    text(svg, x + bw / 2, H - 7, b.label.split(' ')[0], 'faint', 'middle');
+    bindTip(r, () => [`${b.label} (${b.range})`, [{ value: `${b.pct}%`, label: 'of the audience, estimated', color: b.key === primary ? 'var(--accent)' : 'var(--neu)' }]]);
+  });
+  return svg;
+}
+
 /** Multi-series line chart with one y-axis: series [{name, values:[...]}], labels [...]. Used by the admin console. */
 export function lines(parent, labels, series, { height = 220, format = num, integer = true } = {}) {
   const W = 720, H = height, L = 44, R = 12, T = 14, B = 30;

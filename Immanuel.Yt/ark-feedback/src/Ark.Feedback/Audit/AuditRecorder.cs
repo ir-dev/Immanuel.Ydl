@@ -336,6 +336,19 @@ public sealed class AuditRecorder
                      ["insights"] = JsonSerializer.Serialize(r.Insights.Select(i => i.Title)),
                      ["models"] = JsonSerializer.Serialize(r.Models.Select(m => new { m.Role, m.Slug, m.Items, m.Ms })),
                      ["threads"] = r.Compute.Threads, ["ms_per_comment"] = r.Compute.MsPerComment, ["app_version"] = r.AppVersion,
+                     ["genre"] = r.Audience?.Genre.Key, ["genre_secondary"] = r.Audience is { Genre.Secondary.Count: > 0 } ? string.Join(",", r.Audience.Genre.Secondary.Select(g => g.Key)) : null,
+                     ["genre_confidence"] = r.Audience?.Genre.Confidence, ["format"] = r.Audience?.Genre.Format,
+                     ["reach"] = r.Audience?.Reach.Key, ["reach_score"] = r.Audience?.Reach.Score,
+                     ["regions"] = r.Audience is { Reach.Regions.Count: > 0 } ? JsonSerializer.Serialize(r.Audience.Reach.Regions.Take(6).Select(x => new { x.Key, x.Count, x.Pct })) : null,
+                     ["countries"] = r.Audience is { Reach.Countries.Count: > 0 } ? JsonSerializer.Serialize(r.Audience.Reach.Countries.Take(8).Select(x => new { x.Code, x.Comments, x.Flags })) : null,
+                     ["placed_pct"] = r.Audience?.Reach.PlacedPct,
+                     ["age_group"] = r.Audience?.Age.Primary, ["age_range"] = r.Audience?.Age.Range, ["age_confidence"] = r.Audience?.Age.Confidence,
+                     ["age_bands"] = r.Audience is not null ? JsonSerializer.Serialize(r.Audience.Age.Bands.Select(b => new { b.Key, b.Pct })) : null,
+                     ["stated_ages"] = r.Audience?.Age.StatedAges.Count, ["stated_age_median"] = r.Audience?.Age.StatedAges.Median,
+                     ["family_rating"] = r.Audience?.Family.Rating, ["family_reasons"] = r.Audience is not null ? JsonSerializer.Serialize(r.Audience.Family.Reasons) : null,
+                     ["learning_score"] = r.Audience?.Family.Learning.Score, ["profanity_pct"] = r.Audience?.Family.Profanity.Pct,
+                     ["red_flags"] = r.Audience is { Family.Flags.Count: > 0 } ? JsonSerializer.Serialize(r.Audience.Family.Flags.Select(f => new { f.Key, f.Count, f.Pct })) : null,
+                     ["summary"] = ClientIdentity.Clip(r.Summary, 1200),
                  })
             row[k] = v;
         return row;

@@ -13,7 +13,7 @@ public enum AuditTable { Requests, Analyses, Comments }
 /// </summary>
 public static class AuditSchema
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public const string Meta = "audit_meta";
     public const string Days = "audit_days";
 
@@ -165,6 +165,28 @@ public static class AuditSchema
                 ["threads"] = Int(910),
                 ["ms_per_comment"] = Real(920),
                 ["app_version"] = Text(930),
+                // who it is for (schema 2)
+                ["genre"] = Text(940),
+                ["genre_secondary"] = Text(942),
+                ["genre_confidence"] = Real(944),
+                ["format"] = Text(946),
+                ["reach"] = Text(950),
+                ["reach_score"] = Int(952),
+                ["regions"] = Text(954),
+                ["countries"] = Text(956),
+                ["placed_pct"] = Real(958),
+                ["age_group"] = Text(960),
+                ["age_range"] = Text(962),
+                ["age_confidence"] = Text(964),
+                ["age_bands"] = Text(966),
+                ["stated_ages"] = Int(968),
+                ["stated_age_median"] = Real(970),
+                ["family_rating"] = Text(972),
+                ["family_reasons"] = Text(974),
+                ["learning_score"] = Int(976),
+                ["profanity_pct"] = Real(978),
+                ["red_flags"] = Text(980),
+                ["summary"] = Text(982),
                 // did the asker like the report?
                 ["liked"] = Int(1000),
                 ["feedback_note"] = Text(1010),
@@ -241,11 +263,13 @@ public static class AuditSchema
         catch (Microsoft.Data.Sqlite.SqliteException) { /* a file system without shared memory keeps the rollback journal */ }
         await db.CreateTableAsync(Meta, MetaColumns);
         await db.CreateTableAsync(Days, DaysColumns);
-        if (await GetMetaAsync(db, "schema_version") is null)
+        var existing = await GetMetaAsync(db, "schema_version");
+        if (existing is null)
         {
             await SetMetaAsync(db, "schema_version", Version.ToString());
             await SetMetaAsync(db, "created_utc", AuditClock.Format(DateTime.UtcNow));
         }
+        else if (existing != Version.ToString()) await SetMetaAsync(db, "schema_version", Version.ToString());
     }
 
     /// <summary>One day's three tables and their indexes, plus its row in audit_days.</summary>
@@ -258,6 +282,8 @@ public static class AuditSchema
         await db.CreateTableAsync(r, RequestColumns);
         await db.CreateTableAsync(a, AnalysisColumns);
         await db.CreateTableAsync(c, CommentColumns);
+        // a day table created by an older build lacks the columns added since: CREATE TABLE IF NOT EXISTS leaves it alone, so add them
+        await EnsureColumnsAsync(db, a, AnalysisColumns);
         foreach (var ix in new[]
                  {
                      $"CREATE INDEX IF NOT EXISTS ix_{r}_kind ON {r} (kind)",
@@ -274,6 +300,20 @@ public static class AuditSchema
         var n = await db.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM {Days} WHERE day = {day};");
         if (n == 0)
             await db.ExecuteAsync($"INSERT INTO {Days} (day, created_utc, updated_utc) VALUES ({day}, {await db.GetSqlValueAsync(AuditClock.Format(DateTime.UtcNow))}, {await db.GetSqlValueAsync(AuditClock.Format(DateTime.UtcNow))});");
+    }
+
+    /// <summary>ALTER TABLE … ADD COLUMN for every declared column the table lacks (SQLite adds NULL-filled columns in place).</summary>
+    public static async Task EnsureColumnsAsync(ArkDbManager db, string table, Dictionary<string, ColumnProp> columns)
+    {
+        var present = new HashSet<string>(await db.ExecuteSelectAsync<string>($"SELECT name FROM pragma_table_info('{table}');"), StringComparer.OrdinalIgnoreCase);
+        if (present.Count == 0) return;
+        foreach (var (name, prop) in columns.OrderBy(kv => kv.Value.Seq))
+        {
+            if (present.Contains(name) || prop.Constraints.Contains(Constraint.Primary) || prop.Constraints.Contains(Constraint.Primary_AutoIncrement)) continue;
+            var type = prop.DataType == typeof(string) ? "TEXT" : prop.DataType == typeof(double) ? "REAL" : "INTEGER";
+            var dflt = prop.Constraints.Contains(Constraint.Default) ? $" DEFAULT {prop.Default}" : "";
+            await db.ExecuteAsync($"ALTER TABLE {table} ADD COLUMN {await db.GetSafeColumnName(name)} {type}{dflt};");
+        }
     }
 
     /// <summary>Days ("yyyy-MM-dd") that have tables in this file, from sqlite_master, oldest first.</summary>

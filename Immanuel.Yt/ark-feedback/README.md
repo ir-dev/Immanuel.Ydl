@@ -2,7 +2,9 @@
 
 Paste a YouTube link, get a report on what the comments say: sentiment (positive / neutral / negative), the languages
 people wrote in, the themes they talk about, the voices that matter (most liked, most positive, most negative, the
-creator's own replies), mood over time, toxicity and a 28-emotion mix. Everything runs on the server's CPU with open
+creator's own replies), mood over time, toxicity and a 28-emotion mix — and who the video is for: its **genre**, the
+audience's **geographic reach** and **age group**, and a **parents' & teachers' guide** that says whether the comment
+section is fit to share and what a class could do with the video. Everything runs on the server's CPU with open
 models; nothing is sent to a cloud AI.
 
 ASP.NET Core MVC (.NET 10) serving a responsive single-page app. Comments come from yt-dlp (no API key) or the YouTube
@@ -32,6 +34,25 @@ fastText lid.176 (language identification, 176 languages) ships inside the Panli
 
 The page works before the downloads finish: analyses queue and start as soon as the models are on disk. The admin
 console at `/admin` shows every download, the audit writer and the CPU settings.
+
+## Who is the video for? (schema 2, 1.1.0)
+
+Every report opens with an **At a glance** strip (verdict · genre · reach · age group · parents & teachers), an
+**In short** paragraph a parent can read in ten seconds, a **Who is watching** card and a **For parents & teachers**
+card. None of it needs a model: it is word lists and arithmetic over the comments and the video's own labels
+(`Analysis/AudienceProfiler.cs`, lists in `Analysis/Lexicons*.cs`), so it adds ~0.2 s to an 800-comment report and
+is also computed on the fly when an older (schema 1) report is opened.
+
+| Section | What it reads | What it says |
+|---|---|---|
+| **Genre** | title, tags, description, channel name, YouTube category, duration, and which genre words the comments use (30 genres, multilingual) | the genre with a confidence bar, up to two secondary genres, the format (Short / clip / standard / long-form / feature-length / live replay) and the evidence |
+| **Geographic reach** | comment languages (fastText, only confident guesses on comments long enough to guess), flag emoji, "love from …" phrases, country / city / demonym mentions (190 countries, native names included) and places the video itself names | a reach label (global / multi-regional / regional / mostly one country / wide English-speaking / hard to place), a 0–100 spread score, regions with shares, countries split into *from here* (flags, "from …") and *mentions*, and an honest note on how many comments could be placed |
+| **Age group** | a prior per genre, then what commenters say about themselves: stated ages ("I'm 14", "born in 1998", in 12 languages), parents watching with a child, teachers using it with a class, school / college / work-and-marriage cues, teen slang, nostalgia, swearing, comment length, YouTube's 18+ flag, kids' words in the title | five bands (2–6, 7–12, 13–17, 18–24, 25+) with shares, the leading band or span, a confidence, the stated-age median and the evidence |
+| **Parents & teachers** | swearing (multilingual, masked in the report), toxicity (Deep profile), adult / gambling / substances / violence / dangerous stunts / scam / mental-health / disputed-accuracy / religion-and-politics mentions, learning words, warm words, questions, polarisation, duration | a green / amber / red rating with reasons, a printable checklist, a 0–100 learning signal with example quotes, "things to check" with counts, suggested classroom uses, conversation starters, language exposure and a disclaimer that it reads comments, not the video |
+
+The audit row of every analysis carries the same answers (`genre`, `reach`, `regions`, `countries`, `age_group`,
+`age_bands`, `stated_ages`, `family_rating`, `family_reasons`, `learning_score`, `profanity_pct`, `red_flags`,
+`summary`); day tables created by 1.0.0 get the new columns added in place on first use.
 
 ## Profiles — the CPU dial
 

@@ -13,7 +13,7 @@ public sealed class HomeController(IOptions<FeedbackOptions> opt, ReportStore st
     {
         ViewData["AppName"] = opt.Value.AppName;
         ViewData["Title"] = $"{opt.Value.AppName} · Comment sentiment";
-        ViewData["Description"] = "Paste a YouTube link and read what the comments really say: sentiment, languages, themes and the voices that matter, computed with open models on the server's CPU.";
+        ViewData["Description"] = "Paste a YouTube link and read what the comments really say: sentiment, languages, themes, the voices that matter, the genre, the audience's reach and age group, and a guide for parents and teachers — computed with open models on the server's CPU.";
         return View();
     }
 
@@ -27,11 +27,19 @@ public sealed class HomeController(IOptions<FeedbackOptions> opt, ReportStore st
         ViewData["Title"] = meta is null ? $"{opt.Value.AppName} · Report" : $"{meta.Title ?? "Report"} · {Verdict(meta.Verdict)} · {opt.Value.AppName}";
         ViewData["Description"] = meta is null
             ? "A comment sentiment report."
-            : $"{meta.Analysed:N0} comments analysed: {Verdict(meta.Verdict)} (score {(meta.Score > 0 ? "+" : "")}{meta.Score:0}). {meta.Channel}";
+            : string.Join(" · ", new[]
+            {
+                $"{meta.Analysed:N0} comments analysed: {Verdict(meta.Verdict)} (score {(meta.Score > 0 ? "+" : "")}{meta.Score:0})",
+                meta.Genre, meta.AgeGroup is null ? null : $"for {meta.AgeGroup.ToLowerInvariant()} ({meta.AgeRange})",
+                meta.Reach is null ? null : $"audience: {meta.Reach}",
+                meta.Family is null or "unknown" ? null : $"parents & teachers: {FamilyLabel(meta.Family)}", meta.Channel,
+            }.Where(x => !string.IsNullOrEmpty(x)));
         ViewData["Image"] = meta?.Thumbnail;
         ViewData["ReportId"] = id;
         return View("Index");
     }
+
+    private static string FamilyLabel(string r) => r switch { "green" => "looks fine to share", "amber" => "preview first", "red" => "not for younger viewers", _ => r };
 
     private static string Verdict(string v) => v switch
     {

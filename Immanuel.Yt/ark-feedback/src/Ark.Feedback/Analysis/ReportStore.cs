@@ -74,13 +74,20 @@ public sealed class ReportStore
         await using (var fs = File.Create(tmp))
             await JsonSerializer.SerializeAsync(fs, report, Json, ct);
         File.Move(tmp, path, overwrite: true);
+        await SaveMetaAsync(report, ct);
+    }
+
+    private async Task SaveMetaAsync(Report report, CancellationToken ct)
+    {
         var meta = new ReportMeta
         {
             Id = report.Id, CreatedAt = report.CreatedAt, VideoId = report.Video.Id, Title = report.Video.Title, Channel = report.Video.Channel,
             Thumbnail = report.Video.Thumbnail, Profile = report.Profile, Analysed = report.Fetch.Analysed, Score = report.Sentiment.Score,
             Verdict = report.Sentiment.Verdict, PrimaryLanguage = report.Languages.FirstOrDefault()?.Key,
+            Genre = report.Audience?.Genre.Label, GenreIcon = report.Audience?.Genre.Icon, AgeGroup = report.Audience?.Age.Label, AgeRange = report.Audience?.Age.Range,
+            Reach = report.Audience?.Reach.Label, Family = report.Audience?.Family.Rating,
         };
-        await File.WriteAllTextAsync(Path.ChangeExtension(path, ".meta.json"), JsonSerializer.Serialize(meta, Json), ct);
+        await File.WriteAllTextAsync(Path.ChangeExtension(PathOf(report.Id), ".meta.json"), JsonSerializer.Serialize(meta, Json), ct);
         _meta[report.Id] = meta;
     }
 
@@ -92,7 +99,19 @@ public sealed class ReportStore
         try
         {
             await using var fs = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<Report>(fs, Json, ct);
+            var report = await JsonSerializer.DeserializeAsync<Report>(fs, Json, ct);
+            if (report is not null && (report.Audience is null || report.Summary is null))
+            {
+                // a report from before schema 2: the audience profile is computed from what was stored (the report file is left as it is);
+                // the small meta file beside it is refreshed so the home page cards and share previews pick the new fields up
+                try
+                {
+                    ReportBuilder.Enrich(report);
+                    if (Meta(id) is { Genre: null }) await SaveMetaAsync(report, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogWarning(ex, "Couldn't profile the audience of report {Id}", id); }
+            }
+            return report;
         }
         catch (JsonException ex)
         {

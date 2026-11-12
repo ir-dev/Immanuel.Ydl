@@ -98,7 +98,7 @@ public class AuditWriterTests : IDisposable
         Assert.Contains("requests_20261111", tables);
         Assert.Contains("audit_days", tables);
         Assert.Contains("audit_meta", tables);
-        Assert.Equal("1", await AuditSchema.GetMetaAsync(db, "schema_version"));
+        Assert.Equal(AuditSchema.Version.ToString(), await AuditSchema.GetMetaAsync(db, "schema_version"));
 
         var row = await _reports.AnalysisAsync("20261110-00c0ffee");
         Assert.NotNull(row);

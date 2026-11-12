@@ -1,7 +1,7 @@
 // The page: paste a link → watch the analysis → read the report. Hash/path routing: "/" home, "/r/{id}" report.
 import { $, $$, html, setHTML, esc, fmt, verdictName, scoreClass, toast, initTheme, store, safeUrl } from './util.js';
 import { api, watchJob } from './api.js';
-import { sentimentTimeline, shareBars, rankedBars, tableTwin, tableToggle } from './charts.js';
+import { sentimentTimeline, shareBars, rankedBars, ageBands, tableTwin, tableToggle } from './charts.js';
 
 const state = { system: null, profiles: null, profile: store.get('ark-profile', null), job: null, report: null, abort: null };
 
@@ -214,6 +214,7 @@ function byId(r) { const m = new Map(); for (const c of r.comments) m.set(c.id, 
 function renderReport(r) {
   const s = r.sentiment;
   const v = r.video;
+  const a = r.audience;
   const ids = byId(r);
   const box = $('#report');
   const unanalysed = (v.commentCount || 0) > r.fetch.fetched ? v.commentCount - r.fetch.fetched : 0;
@@ -261,6 +262,9 @@ function renderReport(r) {
       </div>
     </section>
 
+    ${a ? glance(r) : ''}
+    ${r.summary ? html`<section class="card summary-card"><div class="summary-mark" aria-hidden="true">✦</div><div><h2>In short</h2><p class="summary-text">${r.summary}</p></div></section>` : ''}
+
     <section class="stats">
       ${stat('Likes-weighted score', fmt.signed(s.weightedScore), 'what the most-endorsed comments say')}
       ${stat('Polarization', fmt.pct(s.polarization * 100), s.polarization >= 0.4 ? 'two large camps' : s.polarization >= 0.2 ? 'some disagreement' : 'one-sided')}
@@ -271,6 +275,9 @@ function renderReport(r) {
     </section>
 
     ${r.insights.length ? html`<section class="card"><div class="card-head"><h2>What stands out</h2></div><div class="insights">${r.insights.map((i) => html`<div class="insight ${i.kind}"><b>${i.title}</b><p>${i.text}</p></div>`)}</div></section>` : ''}
+
+    ${a ? whoSection(r, ids) : ''}
+    ${a ? familySection(r, ids) : ''}
 
     <div class="grid two">
       ${r.timeline.length ? html`<section class="card" id="sec-timeline"><div class="card-head"><h2>Mood over time</h2><p class="sub">by when the comments were posted${r.fetch.source === 'yt-dlp' ? ' (YouTube gives relative dates, so these are approximate)' : ''}</p></div><div class="chart-slot"></div></section>` : ''}
@@ -336,6 +343,12 @@ function renderReport(r) {
   }
   const em = $('#sec-emotions .chart-slot');
   if (em) rankedBars(em, r.emotions.filter((e) => e.key !== 'neutral').map((e) => ({ name: e.label || e.key, count: e.count, label: `comments (${fmt.pct(e.pct)})` })), { max: 10 });
+  const ag = $('#age-chart');
+  if (ag && a) ageBands(ag, a.age.bands, a.age.primary);
+  const rg = $('#region-bars');
+  if (rg && a) {
+    rankedBars(rg, a.reach.regions.slice(0, 6).map((x) => ({ name: x.label, count: x.count, label: `comments (${fmt.pct(x.pct)} of placeable)` })), { max: 6 });
+  }
 
   // voices
   const tabs = $('#voice-tabs');
@@ -389,6 +402,108 @@ function renderReport(r) {
   }
 }
 
+// ── audience: at a glance, who is watching, parents & teachers ──────────
+const AGE_ICON = { preschool: '🧸', kids: '🎒', teens: '🎧', young: '🎓', adults: '🧑‍💼' };
+const VERDICT_ICON = { loved: '🤩', liked: '😊', 'leaning-positive': '🙂', mixed: '😐', divided: '⚖️', 'leaning-negative': '🙁', disliked: '😞', rejected: '😡', thin: '🤏', none: '💬' };
+const FAMILY_LABEL = { green: 'Looks fine to share', amber: 'Preview first', red: 'Not for younger viewers', unknown: 'Too few comments' };
+const flag = (code) => (/^[A-Z]{2}$/.test(code) ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '');
+const confText = (c) => (c >= 0.55 ? 'clear signal' : c >= 0.35 ? 'fair signal' : 'weak signal');
+
+function glance(r) {
+  const s = r.sentiment;
+  const a = r.audience;
+  const g = a.genre;
+  const re = a.reach;
+  const ag = a.age;
+  const f = a.family;
+  const tile = (cls, icon, label, value, hint, title) => html`<div class="glance-tile ${cls}" title="${title || ''}"><span class="g-icon" aria-hidden="true">${icon}</span><div class="g-body"><div class="g-label">${label}</div><div class="g-value">${value}</div><div class="g-hint">${hint}</div></div></div>`;
+  return html`<section class="glance" aria-label="At a glance">
+    ${tile(`v-${scoreClass(s.score)}`, VERDICT_ICON[s.verdict] || '💬', 'Verdict', verdictName(s.verdict), `net ${fmt.signed(s.score)} · ${fmt.count(s.analysed)} comments`)}
+    ${tile('', g.icon, 'Genre', g.label, `${g.formatLabel}${g.secondary.length ? ` · also ${g.secondary.map((x) => x.label).join(', ')}` : ''}`, g.evidence.join(' · '))}
+    ${tile('', '🌍', 'Reach', re.label, `${re.regions.length} region${re.regions.length === 1 ? '' : 's'} · ${re.languageCount} language${re.languageCount === 1 ? '' : 's'}${re.countries.length ? ` · ${re.countries.slice(0, 3).map((c) => flag(c.code)).join(' ')}` : ''}`, re.note)}
+    ${tile('', AGE_ICON[ag.primary] || '👤', 'Age group', ag.range, `${ag.label} · ${ag.confidence} confidence`, ag.evidence.join(' '))}
+    ${tile(`fam-${f.rating}`, html`<i class="light ${f.rating}"></i>`, 'Parents & teachers', FAMILY_LABEL[f.rating] || f.label, f.reasons[0] ? clip(f.reasons[0], 60) : '', f.headline)}
+  </section>`;
+}
+
+function whoSection(r, ids) {
+  const a = r.audience;
+  const g = a.genre;
+  const ag = a.age;
+  const re = a.reach;
+  return html`<section class="card" id="sec-who">
+    <div class="card-head"><h2>Who is watching</h2><p class="sub">genre, age group and where the audience is — read from the comments and the video's own labels, not from YouTube analytics</p></div>
+    <div class="who-grid">
+      <div class="who-panel">
+        <div class="who-head"><span class="big-icon" aria-hidden="true">${g.icon}</span><div><div class="who-kicker">Genre</div><div class="who-title">${g.label}</div><div class="note">${g.formatLabel}${g.category ? ` · YouTube category “${g.category}”` : ''}</div></div></div>
+        <div class="conf-row"><span class="meter"><i style="width:${Math.round(g.confidence * 100)}%"></i></span><span class="note">${confText(g.confidence)}</span></div>
+        ${g.secondary.length ? html`<div class="chips soft">${g.secondary.map((x) => html`<span>${x.icon} ${x.label}</span>`)}</div>` : ''}
+        <ul class="why">${g.evidence.map((e) => html`<li>${e}</li>`)}</ul>
+      </div>
+      <div class="who-panel">
+        <div class="who-head"><span class="big-icon" aria-hidden="true">${AGE_ICON[ag.primary] || '👤'}</span><div><div class="who-kicker">Age group</div><div class="who-title">${ag.label} <span class="range">${ag.range}</span></div><div class="note">${ag.confidence} confidence</div></div></div>
+        <div class="chart-slot" id="age-chart"></div>
+        ${ag.statedAges.count >= 3 ? html`<div class="mini-stats"><div><b>${ag.statedAges.count}</b><span>commenters state their age</span></div><div><b>${ag.statedAges.median}</b><span>median age stated</span></div><div><b>${ag.statedAges.min}–${ag.statedAges.max}</b><span>youngest to oldest</span></div></div>` : ''}
+        ${ag.coViewing || ag.teachers ? html`<div class="chips soft">${ag.coViewing ? html`<span>👨‍👧 ${ag.coViewing} parent${ag.coViewing === 1 ? '' : 's'} watching with a child</span>` : ''}${ag.teachers ? html`<span>🏫 ${ag.teachers} teacher${ag.teachers === 1 ? '' : 's'}</span>` : ''}${ag.school ? html`<span>🎒 ${ag.school} mention school</span>` : ''}${ag.college ? html`<span>🎓 ${ag.college} mention college</span>` : ''}</div>` : ''}
+        <ul class="why">${ag.evidence.map((e) => html`<li>${e}</li>`)}</ul>
+        <p class="note">${ag.note}</p>
+      </div>
+      <div class="who-panel">
+        <div class="who-head"><span class="big-icon" aria-hidden="true">🌍</span><div><div class="who-kicker">Geographic reach</div><div class="who-title">${re.label}</div><div class="note">${Math.round(re.placedPct)}% of comments could be placed · ${re.languageCount} language${re.languageCount === 1 ? '' : 's'}</div></div></div>
+        <div class="conf-row"><span class="meter reach"><i style="width:${re.score}%"></i></span><span class="note">spread ${re.score}/100</span></div>
+        <div class="chart-slot" id="region-bars"></div>
+        ${re.countries.length ? html`<div class="countries">${re.countries.map((c) => html`<span class="country ${c.presence ? 'here' : ''}" title="${c.presence ? `${c.presence} say they are there` : 'mentioned'}${c.namedByVideo ? ' · named by the video' : ''}"><em>${flag(c.code)}</em>${c.name}<small>${c.presence ? `${c.presence} from here` : `${c.comments} mention${c.comments === 1 ? '' : 's'}`}${c.namedByVideo ? ' ★' : ''}</small></span>`)}</div>` : ''}
+        <ul class="why">${re.evidence.map((e) => html`<li>${e}</li>`)}</ul>
+        <p class="note">${re.note}</p>
+      </div>
+    </div>
+  </section>`;
+}
+
+const CHECK_ICON = { ok: '✓', warn: '!', bad: '✕', info: 'i' };
+
+function familySection(r, ids) {
+  const f = r.audience.family;
+  const quotes = (list, n) => list.map((id) => ids.get(id)).filter(Boolean).slice(0, n).map((c) => html`<blockquote class="quote">${clip(c.text, 160)}<span class="by">${c.author || 'anonymous'} · ${fmt.count(c.likes)} likes</span></blockquote>`);
+  return html`<section class="card family-card fam-${f.rating}" id="sec-family">
+    <div class="card-head"><h2>For parents &amp; teachers</h2><p class="sub">is the comment section fit to share, and what could a class do with the video?</p></div>
+    <div class="family-verdict">
+      <span class="light big ${f.rating}" aria-hidden="true"></span>
+      <div>
+        <div class="family-label">${f.label}</div>
+        <p class="muted">${f.headline}</p>
+        ${f.reasons.length ? html`<ul class="reasons">${f.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ''}
+      </div>
+    </div>
+    <div class="family-grid">
+      <div class="fam-panel">
+        <h3>Checklist</h3>
+        <ul class="checks">${f.checks.map((c) => html`<li class="${c.status}"><i aria-hidden="true">${CHECK_ICON[c.status] || ''}</i><div><b>${c.label}</b><span>${c.detail}</span></div></li>`)}</ul>
+      </div>
+      <div class="fam-panel">
+        <h3>Learning signal</h3>
+        <div class="conf-row"><span class="meter learn"><i style="width:${f.learning.score}%"></i></span><b class="score-num">${f.learning.score}<small>/100</small></b></div>
+        <p class="note">${f.learning.level === 'strong' ? 'Strong' : f.learning.level === 'some' ? 'Some' : f.learning.level === 'light' ? 'Light' : 'Little'} learning signal · ${fmt.count(f.learning.comments)} comments (${fmt.pct(f.learning.pct)}) mention learning, understanding or school${f.wholesome ? ` · ${fmt.pct(f.wholesomePct)} read as warm or grateful` : ''}</p>
+        ${f.learning.terms.length ? html`<div class="chips pos">${f.learning.terms.slice(0, 8).map((t) => html`<span>${t.key}<small>${t.count}</small></span>`)}</div>` : ''}
+        ${quotes(f.learning.exampleIds, 2)}
+        ${f.languageExposure.length ? html`<h3 style="margin-top:14px">Language exposure</h3><p class="note">${f.languageExposure.map((l) => `${l.label || l.key} ${fmt.pct(l.pct)}`).join(' · ')}${r.video.language ? ` · video language: ${r.video.language}` : ''}</p>` : ''}
+      </div>
+      <div class="fam-panel">
+        <h3>Things to check</h3>
+        ${f.flags.length ? html`<ul class="flags">${f.flags.map((g) => html`<li><div class="flag-head"><b>${g.label}</b><span class="score-pill ${g.pct >= 2 ? 'neg' : 'neu'}">${fmt.count(g.count)} · ${fmt.pct(g.pct, 1)}</span></div><div class="note">${g.terms.map((t) => `“${t}”`).join(', ')}</div></li>`)}</ul>` : html`<p class="muted">Nothing flagged: no adult themes, gambling, substances, violence, dangerous stunts, scams, distress or disputed facts in the comments read.</p>`}
+        ${f.profanity.comments ? html`<div class="note" style="margin-top:8px">Swearing in ${fmt.count(f.profanity.comments)} comments (${fmt.pct(f.profanity.pct, 1)}): ${f.profanity.terms.map((t) => `${t.key} ×${t.count}`).join(', ')}</div>` : ''}
+        <p class="note" style="margin-top:8px">Debate heat: <b>${f.debateHeat}</b>${r.toxicity ? ` · toxic comments ${fmt.pct(r.toxicity.pct, 1)}` : ' · run the Deep profile to measure toxicity'}</p>
+      </div>
+      <div class="fam-panel">
+        <h3>Suggested uses</h3>
+        ${f.suggestedUses.length ? html`<div class="chips uses">${f.suggestedUses.map((u) => html`<span>${u}</span>`)}</div>` : html`<p class="muted">No particular use suggested.</p>`}
+        ${f.conversationStarterIds.length ? html`<h3 style="margin-top:14px">Conversation starters</h3><p class="note">questions viewers asked, most liked first</p>${quotes(f.conversationStarterIds, 3)}` : ''}
+      </div>
+    </div>
+    <p class="note disclaimer"><span data-icon="info"></span> ${f.disclaimer}</p>
+  </section>`;
+}
+
 function stat(label, value, delta) {
   return html`<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>${delta ? html`<div class="delta">${delta}</div>` : ''}</div>`;
 }
@@ -432,7 +547,7 @@ async function loadRecent() {
     sec.hidden = false;
     setHTML($('#recent-list'), html`${reports.map((m) => html`<a class="recent-card" href="/r/${m.id}" data-report="${m.id}">
       <img src="${m.thumbnail || `https://i.ytimg.com/vi/${m.videoId}/mqdefault.jpg`}" alt="" loading="lazy">
-      <div><div class="t">${m.title || m.videoId}</div><div class="m"><span class="score-pill ${scoreClass(m.score)}">${fmt.signed(m.score)}</span><span>${verdictName(m.verdict)}</span><span>· ${fmt.count(m.analysed)} comments</span></div></div></a>`)}`);
+      <div><div class="t">${m.title || m.videoId}</div><div class="m"><span class="score-pill ${scoreClass(m.score)}">${fmt.signed(m.score)}</span><span>${verdictName(m.verdict)}</span><span>· ${fmt.count(m.analysed)} comments</span></div>${m.genre || m.ageRange ? html`<div class="m tags">${m.genre ? html`<span>${m.genreIcon || ''} ${m.genre}</span>` : ''}${m.ageRange ? html`<span>👤 ${m.ageRange}</span>` : ''}${m.family && m.family !== 'unknown' ? html`<span><i class="light ${m.family}"></i> ${FAMILY_LABEL[m.family]}</span>` : ''}</div>` : ''}</div></a>`)}`);
     $('#recent-list').addEventListener('click', (e) => {
       const a = e.target.closest('a[data-report]');
       if (!a) return;
